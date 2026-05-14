@@ -435,6 +435,7 @@ cháy"></textarea>
       <div class="actions">
         <button id="saveBtn" type="button">Save Configuration</button>
         <button class="secondary" id="testAiBtn" type="button">Test AI API</button>
+        <button class="secondary" id="testTelegramBtn" type="button">Test Telegram</button>
         <span id="configStatus" class="status"></span>
       </div>
     </section>
@@ -1137,12 +1138,38 @@ cháy"></textarea>
       }
     }
 
+    async function testTelegram() {
+      try {
+        validateTimeoutInputs();
+      } catch (err) {
+        setStatus("configStatus", err.message, "err");
+        document.getElementById("result").textContent = err.message;
+        return;
+      }
+      document.getElementById("result").textContent = "Sending Telegram test...";
+      setStatus("configStatus", "Testing Telegram...", "");
+      try {
+        const {response, data} = await requestJson("api/test-telegram", {
+          method: "POST",
+          headers: {"Content-Type": "application/json"},
+          body: JSON.stringify(buildConfigPayload())
+        }, 30000);
+        document.getElementById("result").textContent = JSON.stringify(data, null, 2);
+        setStatus("configStatus", response.ok && data.success ? "Telegram OK" : "Telegram failed", response.ok && data.success ? "ok" : "err");
+      } catch (err) {
+        const message = err.name === "AbortError" ? "Telegram test timeout." : `Telegram test error: ${err.message}`;
+        document.getElementById("result").textContent = message;
+        setStatus("configStatus", message, "err");
+      }
+    }
+
     document.getElementById("reloadBtn").addEventListener("click", loadConfig);
     document.querySelectorAll(".tab-btn").forEach(button => {
       button.addEventListener("click", () => setActiveTab(button.dataset.tab));
     });
     document.getElementById("saveBtn").addEventListener("click", () => saveConfig());
     document.getElementById("testAiBtn").addEventListener("click", testAiApi);
+    document.getElementById("testTelegramBtn").addEventListener("click", testTelegram);
     document.getElementById("saveCamerasBtn").addEventListener("click", () => saveConfig("cameraStatus"));
     document.getElementById("loadEntitiesBtn").addEventListener("click", loadHaEntities);
     document.getElementById("addEntityBtn").addEventListener("click", addSelectedEntity);
@@ -1400,6 +1427,21 @@ def validate_ai_options(options: dict[str, Any]) -> None:
 
     if options["ai_timeout"] < 1:
         raise ValueError("ai_timeout must be greater than 0")
+
+
+def validate_telegram_options(options: dict[str, Any]) -> None:
+    required = ["telegram_bot_token", "telegram_chat_id"]
+    missing = [key for key in required if not str(options.get(key, "")).strip()]
+    if missing:
+        raise ValueError(f"Missing required Telegram option(s): {', '.join(missing)}")
+
+    try:
+        options["telegram_timeout"] = int(options.get("telegram_timeout", 10))
+    except (TypeError, ValueError) as exc:
+        raise ValueError("telegram_timeout must be an integer") from exc
+
+    if options["telegram_timeout"] < 1:
+        raise ValueError("telegram_timeout must be greater than 0")
 
 
 def validate_camera(camera: Any) -> str:
@@ -1673,6 +1715,20 @@ def send_telegram(camera: str, analysis: str, photo_path: str, options: dict[str
             files={"photo": photo},
             timeout=options["telegram_timeout"],
         )
+    response.raise_for_status()
+
+
+def send_telegram_text(message: str, options: dict[str, Any]) -> None:
+    logger.info("Sending Telegram text test")
+    url = f"https://api.telegram.org/bot{options['telegram_bot_token']}/sendMessage"
+    response = requests.post(
+        url,
+        data={
+            "chat_id": options["telegram_chat_id"],
+            "text": message,
+        },
+        timeout=options["telegram_timeout"],
+    )
     response.raise_for_status()
 
 
@@ -1974,9 +2030,41 @@ async def test_ai(request: Request) -> JSONResponse:
         return error_response("internal error", 500)
 
 
+@app.post("/api/test-telegram")
+async def test_telegram(request: Request) -> JSONResponse:
+    try:
+        options = read_options()
+        try:
+            body = await request.json()
+        except json.JSONDecodeError:
+            body = {}
+        if isinstance(body, dict):
+            options = merge_user_options(options, body)
+            normalize_options(options)
+        validate_telegram_options(options)
+        send_telegram_text("Simple AI Vision Telegram test OK.", options)
+        return JSONResponse({"success": True, "message": "Telegram message sent"})
+    except ValueError as exc:
+        logger.error("%s", exc)
+        return error_response(str(exc), 400)
+    except requests.Timeout:
+        logger.error("Telegram test timeout")
+        return JSONResponse({"success": False, "error": "Telegram timeout"})
+    except requests.HTTPError as exc:
+        logger.error("Telegram API error: %s", exc)
+        return upstream_error_response(exc)
+    except requests.RequestException as exc:
+        logger.error("Telegram test network error: %s", exc)
+        return JSONResponse({"success": False, "error": "Telegram network error", "details": str(exc)})
+    except Exception:
+        logger.exception("Unexpected Telegram test error")
+        return error_response("internal error", 500)
+
+
 @app.post("/analyze")
 async def analyze(request: Request) -> JSONResponse:
     snapshot_path = None
+    event_camera = ""
     try:
         try:
             body = await request.json()
@@ -1989,6 +2077,8 @@ async def analyze(request: Request) -> JSONResponse:
         options = load_options()
         camera_value = str(body.get("camera", "")).strip()
         entity_value = str(body.get("entity_id", "")).strip()
+        event_camera = camera_value or entity_value or "unknown"
+        logger.info("Analyze request camera=%s entity_id=%s", camera_value, entity_value)
         saved_camera = find_saved_camera(
             options,
             camera_value or None,
@@ -2012,6 +2102,7 @@ async def analyze(request: Request) -> JSONResponse:
             entity_value or None,
             options,
         )
+        event_camera = camera
         data_url = image_to_data_url(snapshot_path)
         analysis = call_ai(data_url, options)
         keyword = matched_keyword(analysis, options["keyword_match"])
@@ -2040,18 +2131,23 @@ async def analyze(request: Request) -> JSONResponse:
 
     except ValueError as exc:
         logger.error("%s", exc)
+        record_event(event_camera or "unknown", "", "config_error", error=str(exc))
         return error_response(str(exc), 400)
     except requests.Timeout:
         logger.error("Network timeout")
+        record_event(event_camera or "unknown", "", "timeout", error="network timeout")
         return JSONResponse({"success": False, "error": "network timeout"})
     except requests.HTTPError as exc:
         logger.error("Upstream HTTP error: %s", exc)
+        record_event(event_camera or "unknown", "", "upstream_error", error=str(exc))
         return upstream_error_response(exc)
     except requests.RequestException as exc:
         logger.error("Network error: %s", exc)
+        record_event(event_camera or "unknown", "", "network_error", error=str(exc))
         return JSONResponse({"success": False, "error": "network error", "details": str(exc)})
     except Exception as exc:
         logger.exception("Unexpected error")
+        record_event(event_camera or "unknown", "", "internal_error", error=str(exc))
         return error_response("internal error", 500)
     finally:
         cleanup_file(snapshot_path)
