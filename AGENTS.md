@@ -42,7 +42,6 @@ Never introduce:
 * websocket systems
 * database
 * ORM
-* MQTT
 * Redis
 * Celery
 * Frigate integration
@@ -68,9 +67,14 @@ Allowed libraries:
 * FastAPI
 * requests
 * uvicorn
+* paho-mqtt
 * standard library modules
 
 Avoid adding dependencies unless absolutely necessary.
+
+MQTT is allowed only as an optional integration for publishing addon events.
+Do not use MQTT as a required runtime dependency for core snapshot analysis.
+Avoid persistent MQTT subscriber loops unless explicitly requested.
 
 ---
 

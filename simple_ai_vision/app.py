@@ -11,6 +11,11 @@ import requests
 from fastapi import FastAPI, Request
 from fastapi.responses import HTMLResponse, JSONResponse, Response
 
+try:
+    import paho.mqtt.publish as mqtt_publish
+except ImportError:
+    mqtt_publish = None
+
 
 UI_OPTIONS_PATH = "/data/simple_ai_vision_config.json"
 EVENT_LOG_PATH = "/data/simple_ai_vision_events.jsonl"
@@ -159,7 +164,7 @@ INDEX_HTML = r"""
     }
     .camera-head {
       display: grid;
-      grid-template-columns: minmax(90px, .7fr) minmax(120px, 1fr) minmax(160px, 1.3fr) minmax(120px, 1fr) auto auto auto auto;
+      grid-template-columns: minmax(90px, .7fr) minmax(120px, 1fr) minmax(160px, 1.3fr) minmax(140px, 1.2fr) minmax(120px, 1fr) auto auto auto auto;
       gap: 8px;
       color: var(--muted);
       font-size: 12px;
@@ -168,7 +173,7 @@ INDEX_HTML = r"""
     }
     .camera-row {
       display: grid;
-      grid-template-columns: minmax(90px, .7fr) minmax(120px, 1fr) minmax(160px, 1.3fr) minmax(120px, 1fr) auto auto auto auto;
+      grid-template-columns: minmax(90px, .7fr) minmax(120px, 1fr) minmax(160px, 1.3fr) minmax(140px, 1.2fr) minmax(120px, 1fr) auto auto auto auto;
       gap: 8px;
       margin-bottom: 8px;
     }
@@ -431,6 +436,33 @@ cháy"></textarea>
           <label for="telegram_timeout">Telegram Timeout</label>
           <input id="telegram_timeout" type="number" min="1" placeholder="10">
         </div>
+        <div>
+          <label for="mqtt_enabled">MQTT Publish</label>
+          <label class="monitor-toggle">
+            <input id="mqtt_enabled" type="checkbox">
+            <span>Enable MQTT events</span>
+          </label>
+        </div>
+        <div>
+          <label for="mqtt_host">MQTT Host</label>
+          <input id="mqtt_host" autocomplete="off" placeholder="core-mosquitto hoặc 192.168.1.10">
+        </div>
+        <div>
+          <label for="mqtt_port">MQTT Port</label>
+          <input id="mqtt_port" type="number" min="1" placeholder="1883">
+        </div>
+        <div>
+          <label for="mqtt_topic">MQTT Topic</label>
+          <input id="mqtt_topic" autocomplete="off" placeholder="simple_ai_vision/events">
+        </div>
+        <div>
+          <label for="mqtt_username">MQTT Username</label>
+          <input id="mqtt_username" autocomplete="off">
+        </div>
+        <div>
+          <label for="mqtt_password">MQTT Password</label>
+          <input id="mqtt_password" type="password" autocomplete="new-password">
+        </div>
       </div>
       <div class="actions">
         <button id="saveBtn" type="button">Save Configuration</button>
@@ -459,10 +491,16 @@ cháy"></textarea>
         <button class="secondary" id="addStreamBtn" type="button">Add Stream</button>
       </div>
       <div id="streamStatus" class="status"></div>
+      <div class="actions">
+        <button class="secondary" id="loadTriggersBtn" type="button">Load Motion/Sensors</button>
+        <span id="triggerStatus" class="status"></span>
+      </div>
+      <datalist id="triggerEntityList"></datalist>
       <div class="camera-head">
         <div>Monitor</div>
         <div>Name</div>
         <div>HA entity</div>
+        <div>Trigger</div>
         <div>go2rtc src</div>
         <div></div>
         <div></div>
@@ -475,6 +513,8 @@ cháy"></textarea>
         <button class="secondary" id="saveCamerasBtn" type="button">Save Cameras</button>
         <span id="cameraStatus" class="status"></span>
       </div>
+      <h2>Automation YAML</h2>
+      <pre id="automationYaml">Select motion/sensor triggers to generate Home Assistant automation YAML.</pre>
     </section>
 
     <section class="panel tab-panel" id="livePanel">
@@ -532,7 +572,9 @@ cháy"></textarea>
     const fields = [
       "go2rtc_url", "ai_api_key", "ai_base_url", "ai_model",
       "telegram_bot_token", "telegram_chat_id", "prompt",
-      "ai_timeout", "snapshot_timeout", "telegram_timeout"
+      "ai_timeout", "snapshot_timeout", "telegram_timeout",
+      "mqtt_host", "mqtt_port", "mqtt_topic", "mqtt_username",
+      "mqtt_password"
     ];
     let cameras = [];
     let currentViewerUrl = "";
@@ -616,6 +658,7 @@ cháy"></textarea>
     function buildConfigPayload() {
       const payload = {};
       fields.forEach(id => payload[id] = document.getElementById(id).value);
+      payload.mqtt_enabled = document.getElementById("mqtt_enabled").checked;
       payload.keyword_match = linesToList(document.getElementById("keyword_match").value);
       payload.cameras = cameras.map(normalizeCamera).filter(camera => (
         camera.name || camera.entity_id || camera.src
@@ -625,12 +668,13 @@ cháy"></textarea>
 
     function normalizeCamera(camera) {
       if (typeof camera === "string") {
-        return {enabled: true, name: "", entity_id: "", src: camera.trim()};
+        return {enabled: true, name: "", entity_id: "", trigger_entity_id: "", src: camera.trim()};
       }
       return {
         enabled: camera?.enabled !== false,
         name: String(camera?.name || "").trim(),
         entity_id: String(camera?.entity_id || "").trim(),
+        trigger_entity_id: String(camera?.trigger_entity_id || "").trim(),
         src: String(camera?.src || "").trim()
       };
     }
@@ -725,6 +769,17 @@ cháy"></textarea>
         entityInput.addEventListener("input", () => cameras[index].entity_id = entityInput.value);
         entityWrap.append(entityLabel, entityInput);
 
+        const triggerWrap = document.createElement("div");
+        const triggerLabel = document.createElement("div");
+        triggerLabel.className = "mobile-label";
+        triggerLabel.textContent = "Trigger";
+        const triggerInput = document.createElement("input");
+        triggerInput.value = item.trigger_entity_id;
+        triggerInput.placeholder = "Motion/sensor trigger";
+        triggerInput.setAttribute("list", "triggerEntityList");
+        triggerInput.addEventListener("input", () => cameras[index].trigger_entity_id = triggerInput.value);
+        triggerWrap.append(triggerLabel, triggerInput);
+
         const srcWrap = document.createElement("div");
         const srcLabel = document.createElement("div");
         srcLabel.className = "mobile-label";
@@ -762,10 +817,56 @@ cháy"></textarea>
           renderCameras();
         });
 
-        row.append(monitorWrap, nameWrap, entityWrap, srcWrap, snapshot, video, test, remove);
+        row.append(monitorWrap, nameWrap, entityWrap, triggerWrap, srcWrap, snapshot, video, test, remove);
         list.append(row);
       });
       renderLiveCameras();
+      renderAutomationYaml();
+    }
+
+    function analyzePayload(camera) {
+      const item = normalizeCamera(camera);
+      if (item.src) return `{"camera":"${item.src}"}`;
+      if (item.entity_id) return `{"entity_id":"${item.entity_id}"}`;
+      return "{}";
+    }
+
+    function renderAutomationYaml() {
+      const output = document.getElementById("automationYaml");
+      if (!output) return;
+      const items = cameras.map(normalizeCamera).filter(camera => (
+        camera.enabled && camera.trigger_entity_id && (camera.src || camera.entity_id)
+      ));
+      if (!items.length) {
+        output.textContent = "Select motion/sensor triggers to generate Home Assistant automation YAML.";
+        return;
+      }
+      const blocks = items.map((camera, index) => {
+        const alias = `Simple AI Vision - ${cameraLabel(camera)}`;
+        return [
+          `- alias: "${alias}"`,
+          "trigger:",
+          "    - platform: state",
+          `      entity_id: ${camera.trigger_entity_id}`,
+          `      to: "on"`,
+          "action:",
+          "    - service: rest_command.simple_ai_vision_analyze",
+          "      data:",
+          `        payload: '${analyzePayload(camera)}'`,
+          "mode: single"
+        ].join("\n");
+      });
+      output.textContent = [
+        "rest_command:",
+        "  simple_ai_vision_analyze:",
+        '    url: "http://127.0.0.1:8000/analyze"',
+        "    method: post",
+        '    content_type: "application/json"',
+        '    payload: "{{ payload }}"',
+        "",
+        "automation:",
+        blocks.map(block => block.split("\n").map(line => `  ${line}`).join("\n")).join("\n\n")
+      ].join("\n");
     }
 
     function cameraSrcOrError(camera) {
@@ -884,6 +985,32 @@ cháy"></textarea>
       }
     }
 
+    function renderTriggerEntities(entities) {
+      const list = document.getElementById("triggerEntityList");
+      list.innerHTML = "";
+      entities.forEach(entity => {
+        const option = document.createElement("option");
+        option.value = entity.entity_id;
+        option.label = entity.name ? `${entity.name} (${entity.entity_id})` : entity.entity_id;
+        list.append(option);
+      });
+    }
+
+    async function loadTriggerEntities() {
+      setStatus("triggerStatus", "Loading motion/sensor triggers...", "");
+      try {
+        const {response, data} = await requestJson("api/hass/triggers", {}, 15000);
+        if (!response.ok || !data.success) {
+          setStatus("triggerStatus", data.error || "Could not load trigger entities", "err");
+          return;
+        }
+        renderTriggerEntities(data.entities || []);
+        setStatus("triggerStatus", `Loaded ${(data.entities || []).length} trigger entities`, "ok");
+      } catch (err) {
+        setStatus("triggerStatus", err.name === "AbortError" ? "Trigger load timeout" : err.message, "err");
+      }
+    }
+
     function addSelectedEntity() {
       const select = document.getElementById("haEntitySelect");
       const value = select.value.trim();
@@ -896,6 +1023,7 @@ cháy"></textarea>
         enabled: true,
         name: selected?.dataset.name || "",
         entity_id: value,
+        trigger_entity_id: "",
         src: ""
       });
       renderCameras();
@@ -942,7 +1070,7 @@ cháy"></textarea>
         setStatus("streamStatus", "Select a go2rtc stream first, or use Add Camera for manual input.", "err");
         return;
       }
-      cameras.push({enabled: true, name: src, entity_id: "", src});
+      cameras.push({enabled: true, name: src, entity_id: "", trigger_entity_id: "", src});
       renderCameras();
       setStatus("streamStatus", `Added go2rtc stream ${src}`, "ok");
     }
@@ -1053,6 +1181,7 @@ cháy"></textarea>
         }
         const config = data.config;
         fields.forEach(id => document.getElementById(id).value = config[id] ?? "");
+        document.getElementById("mqtt_enabled").checked = !!config.mqtt_enabled;
         document.getElementById("keyword_match").value = (config.keyword_match || []).join("\n");
         cameras = config.cameras || [];
         renderCameras();
@@ -1173,6 +1302,7 @@ cháy"></textarea>
     document.getElementById("saveCamerasBtn").addEventListener("click", () => saveConfig("cameraStatus"));
     document.getElementById("loadEntitiesBtn").addEventListener("click", loadHaEntities);
     document.getElementById("addEntityBtn").addEventListener("click", addSelectedEntity);
+    document.getElementById("loadTriggersBtn").addEventListener("click", loadTriggerEntities);
     document.getElementById("loadStreamsBtn").addEventListener("click", loadGo2rtcStreams);
     document.getElementById("addStreamBtn").addEventListener("click", addSelectedStream);
     document.getElementById("refreshLiveBtn").addEventListener("click", renderLiveCameras);
@@ -1180,7 +1310,7 @@ cháy"></textarea>
     document.getElementById("liveLimit").addEventListener("input", renderLiveCameras);
     document.getElementById("refreshEventsBtn").addEventListener("click", loadEvents);
     document.getElementById("addCameraBtn").addEventListener("click", () => {
-      cameras.push({enabled: true, name: "", entity_id: "", src: ""});
+      cameras.push({enabled: true, name: "", entity_id: "", trigger_entity_id: "", src: ""});
       renderCameras();
     });
     document.getElementById("closeViewerBtn").addEventListener("click", () => {
@@ -1271,6 +1401,12 @@ def default_options() -> dict[str, Any]:
         "ai_timeout": 30,
         "snapshot_timeout": 10,
         "telegram_timeout": 10,
+        "mqtt_enabled": False,
+        "mqtt_host": "",
+        "mqtt_port": 1883,
+        "mqtt_username": "",
+        "mqtt_password": "",
+        "mqtt_topic": "simple_ai_vision/events",
     }
 
 
@@ -1296,7 +1432,7 @@ def load_options() -> dict[str, Any]:
 def merge_user_options(current: dict[str, Any], incoming: dict[str, Any]) -> dict[str, Any]:
     merged = dict(current)
     cleaned = dict(incoming)
-    for secret_key in ("ai_api_key", "telegram_bot_token"):
+    for secret_key in ("ai_api_key", "telegram_bot_token", "mqtt_password"):
         if secret_key in cleaned and not str(cleaned.get(secret_key, "")).strip():
             cleaned.pop(secret_key)
     merged.update(cleaned)
@@ -1336,6 +1472,12 @@ def normalize_options(options: dict[str, Any]) -> None:
         except (TypeError, ValueError):
             options[key] = 1
 
+    options["mqtt_enabled"] = bool(options.get("mqtt_enabled"))
+    try:
+        options["mqtt_port"] = int(options.get("mqtt_port", 1883))
+    except (TypeError, ValueError):
+        options["mqtt_port"] = 1883
+
 
 def normalize_camera_list(cameras: list[Any]) -> list[dict[str, str]]:
     normalized = []
@@ -1347,6 +1489,7 @@ def normalize_camera_list(cameras: list[Any]) -> list[dict[str, str]]:
                 "enabled": camera.get("enabled") is not False,
                 "name": str(camera.get("name", "")).strip(),
                 "entity_id": str(camera.get("entity_id", "")).strip(),
+                "trigger_entity_id": str(camera.get("trigger_entity_id", "")).strip(),
                 "src": str(camera.get("src", "")).strip(),
             }
         else:
@@ -1382,6 +1525,14 @@ def validate_saved_options(options: dict[str, Any]) -> None:
             raise ValueError(f"{key} must be an integer") from exc
         if options[key] < 1:
             raise ValueError(f"{key} must be greater than 0")
+
+    if options.get("mqtt_enabled"):
+        if not str(options.get("mqtt_host", "")).strip():
+            raise ValueError("mqtt_host is required when MQTT is enabled")
+        if not str(options.get("mqtt_topic", "")).strip():
+            raise ValueError("mqtt_topic is required when MQTT is enabled")
+        if int(options.get("mqtt_port", 1883)) < 1:
+            raise ValueError("mqtt_port must be greater than 0")
 
 
 def find_saved_camera(
@@ -1802,6 +1953,48 @@ def record_event(
     os.makedirs(os.path.dirname(EVENT_LOG_PATH), exist_ok=True)
     with open(EVENT_LOG_PATH, "a", encoding="utf-8") as file:
         file.write(json.dumps(event, ensure_ascii=False) + "\n")
+    publish_mqtt_event(event)
+
+
+def publish_mqtt_event(event: dict[str, str]) -> None:
+    try:
+        options = read_options()
+    except Exception as exc:
+        logger.warning("Could not read config for MQTT publish: %s", exc)
+        return
+
+    if not options.get("mqtt_enabled"):
+        return
+
+    if mqtt_publish is None:
+        logger.error("MQTT publish requested but paho-mqtt is not installed")
+        return
+
+    host = str(options.get("mqtt_host", "")).strip()
+    topic = str(options.get("mqtt_topic", "")).strip()
+    if not host or not topic:
+        logger.error("MQTT publish skipped because mqtt_host or mqtt_topic is empty")
+        return
+
+    auth = None
+    username = str(options.get("mqtt_username", "")).strip()
+    password = str(options.get("mqtt_password", ""))
+    if username:
+        auth = {"username": username, "password": password}
+
+    try:
+        mqtt_publish.single(
+            topic,
+            payload=json.dumps(event, ensure_ascii=False),
+            hostname=host,
+            port=int(options.get("mqtt_port", 1883)),
+            auth=auth,
+            qos=0,
+            retain=False,
+        )
+        logger.info("MQTT event published topic=%s status=%s", topic, event.get("status"))
+    except Exception as exc:
+        logger.error("MQTT publish failed: %s", exc)
 
 
 def read_events(limit: int = 100) -> list[dict[str, str]]:
@@ -1872,6 +2065,54 @@ def get_hass_camera_entities() -> list[dict[str, str]]:
     return sorted(entities, key=lambda entity: entity["entity_id"])
 
 
+def get_hass_trigger_entities() -> list[dict[str, str]]:
+    token = os.environ.get("SUPERVISOR_TOKEN", "")
+    if not token:
+        raise ValueError("Home Assistant API is not available")
+
+    response = requests.get(
+        "http://supervisor/core/api/states",
+        headers={"Authorization": f"Bearer {token}"},
+        timeout=10,
+    )
+    response.raise_for_status()
+
+    try:
+        states = response.json()
+    except ValueError as exc:
+        raise ValueError("Home Assistant returned non-JSON response") from exc
+
+    if not isinstance(states, list):
+        raise ValueError("Home Assistant returned invalid states payload")
+
+    entities: list[dict[str, str]] = []
+    for item in states:
+        if not isinstance(item, dict):
+            continue
+
+        entity_id = str(item.get("entity_id", "")).strip()
+        domain = entity_id.split(".", 1)[0]
+        if domain not in ("binary_sensor", "sensor"):
+            continue
+
+        attributes = item.get("attributes", {})
+        name = ""
+        device_class = ""
+        if isinstance(attributes, dict):
+            name = str(attributes.get("friendly_name", "")).strip()
+            device_class = str(attributes.get("device_class", "")).strip()
+
+        entities.append(
+            {
+                "entity_id": entity_id,
+                "name": name,
+                "device_class": device_class,
+            }
+        )
+
+    return sorted(entities, key=lambda entity: entity["entity_id"])
+
+
 @app.get("/health")
 def health() -> dict[str, bool]:
     return {"success": True}
@@ -1906,6 +2147,24 @@ def hass_cameras() -> JSONResponse:
         return upstream_error_response(exc)
     except requests.RequestException as exc:
         logger.error("Home Assistant API network error: %s", exc)
+        return JSONResponse({"success": False, "error": "Home Assistant API network error", "details": str(exc)})
+
+
+@app.get("/api/hass/triggers")
+def hass_triggers() -> JSONResponse:
+    try:
+        return JSONResponse({"success": True, "entities": get_hass_trigger_entities()})
+    except ValueError as exc:
+        logger.error("%s", exc)
+        return error_response(str(exc), 400)
+    except requests.Timeout:
+        logger.error("Home Assistant trigger load timeout")
+        return JSONResponse({"success": False, "error": "Home Assistant API timeout"})
+    except requests.HTTPError as exc:
+        logger.error("Home Assistant trigger API HTTP error: %s", exc)
+        return upstream_error_response(exc)
+    except requests.RequestException as exc:
+        logger.error("Home Assistant trigger API network error: %s", exc)
         return JSONResponse({"success": False, "error": "Home Assistant API network error", "details": str(exc)})
 
 
