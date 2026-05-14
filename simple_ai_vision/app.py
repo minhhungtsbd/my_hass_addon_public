@@ -980,17 +980,21 @@ cháy"></textarea>
 
       const table = document.createElement("table");
       table.className = "events-table";
-      table.innerHTML = "<thead><tr><th>Time</th><th>Camera</th><th>Analysis</th></tr></thead>";
+      table.innerHTML = "<thead><tr><th>Time</th><th>Status</th><th>Camera</th><th>Keyword</th><th>Analysis</th></tr></thead>";
       const body = document.createElement("tbody");
       events.forEach(event => {
         const row = document.createElement("tr");
         const time = document.createElement("td");
         time.textContent = event.time || "";
+        const status = document.createElement("td");
+        status.textContent = event.status || "";
         const camera = document.createElement("td");
         camera.textContent = event.camera || "";
+        const keyword = document.createElement("td");
+        keyword.textContent = event.keyword || "";
         const analysis = document.createElement("td");
-        analysis.textContent = event.analysis || "";
-        row.append(time, camera, analysis);
+        analysis.textContent = event.error || event.analysis || "";
+        row.append(time, status, camera, keyword, analysis);
         body.append(row);
       });
       table.append(body);
@@ -1594,6 +1598,10 @@ def call_ai_text(options: dict[str, Any]) -> str:
 
 
 def keyword_matched(analysis: str, keywords: list[Any]) -> bool:
+    return bool(matched_keyword(analysis, keywords))
+
+
+def matched_keyword(analysis: str, keywords: list[Any]) -> str:
     logger.info("Checking keyword match")
     for keyword in keywords:
         pattern = str(keyword).strip()
@@ -1601,11 +1609,11 @@ def keyword_matched(analysis: str, keywords: list[Any]) -> bool:
             continue
         try:
             if re.search(pattern, analysis, flags=re.IGNORECASE):
-                return True
+                return pattern
         except re.error:
             if pattern.lower() in analysis.lower():
-                return True
-    return False
+                return pattern
+    return ""
 
 
 def send_telegram(camera: str, analysis: str, photo_path: str, options: dict[str, Any]) -> None:
@@ -1678,11 +1686,20 @@ def get_go2rtc_streams(options: dict[str, Any]) -> list[dict[str, str]]:
     return sorted(streams, key=lambda stream: stream["src"])
 
 
-def record_event(camera: str, analysis: str) -> None:
+def record_event(
+    camera: str,
+    analysis: str,
+    status: str,
+    keyword: str = "",
+    error: str = "",
+) -> None:
     event = {
         "time": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+        "status": status,
         "camera": camera,
+        "keyword": keyword,
         "analysis": analysis,
+        "error": error,
     }
     os.makedirs(os.path.dirname(EVENT_LOG_PATH), exist_ok=True)
     with open(EVENT_LOG_PATH, "a", encoding="utf-8") as file:
@@ -1707,8 +1724,11 @@ def read_events(limit: int = 100) -> list[dict[str, str]]:
         events.append(
             {
                 "time": str(event.get("time", "")),
+                "status": str(event.get("status", "sent")),
                 "camera": str(event.get("camera", "")),
+                "keyword": str(event.get("keyword", "")),
                 "analysis": str(event.get("analysis", "")),
+                "error": str(event.get("error", "")),
             }
         )
     return events
@@ -1935,19 +1955,26 @@ async def analyze(request: Request) -> JSONResponse:
         )
         data_url = image_to_data_url(snapshot_path)
         analysis = call_ai(data_url, options)
-        matched = keyword_matched(analysis, options["keyword_match"])
+        keyword = matched_keyword(analysis, options["keyword_match"])
+        matched = bool(keyword)
 
         if matched:
-            send_telegram(camera, analysis, snapshot_path, options)
-            record_event(camera, analysis)
-            logger.info("Telegram sent for camera=%s", camera)
+            try:
+                send_telegram(camera, analysis, snapshot_path, options)
+            except requests.RequestException as exc:
+                record_event(camera, analysis, "telegram_error", keyword, str(exc))
+                raise
+            record_event(camera, analysis, "sent", keyword)
+            logger.info("Telegram sent for camera=%s keyword=%s", camera, keyword)
         else:
+            record_event(camera, analysis, "no_match")
             logger.info("No keyword match for camera=%s", camera)
 
         return JSONResponse(
             {
                 "success": True,
                 "matched": matched,
+                "matched_keyword": keyword,
                 "analysis": analysis,
             }
         )
