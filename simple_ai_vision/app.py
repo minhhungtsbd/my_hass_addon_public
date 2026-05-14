@@ -468,6 +468,10 @@ cháy"></textarea>
       return apiPath(`api/camera/frame?camera=${encodeURIComponent(camera)}&_=${Date.now()}`);
     }
 
+    function entitySnapshotUrl(entityId) {
+      return apiPath(`api/camera/frame?entity_id=${encodeURIComponent(entityId)}&_=${Date.now()}`);
+    }
+
     async function requestJson(path, options = {}, timeoutMs = 45000) {
       const controller = new AbortController();
       const timer = setTimeout(() => controller.abort(), timeoutMs);
@@ -576,13 +580,13 @@ cháy"></textarea>
         test.className = "secondary";
         test.type = "button";
         test.textContent = "Test";
-        test.addEventListener("click", () => testCamera(srcInput.value, cameraLabel(cameras[index])));
+        test.addEventListener("click", () => testCamera(cameras[index]));
 
         const snapshot = document.createElement("button");
         snapshot.className = "secondary";
         snapshot.type = "button";
         snapshot.textContent = "Snapshot";
-        snapshot.addEventListener("click", () => viewSnapshot(srcInput.value, cameraLabel(cameras[index])));
+        snapshot.addEventListener("click", () => viewSnapshot(cameras[index], cameraLabel(cameras[index])));
 
         const video = document.createElement("button");
         video.className = "secondary";
@@ -614,6 +618,13 @@ cháy"></textarea>
       return src;
     }
 
+    function snapshotSourceOrError(camera) {
+      const item = normalizeCamera(camera);
+      if (item.src || item.entity_id) return item;
+      document.getElementById("result").textContent = "go2rtc src or HA entity is required.";
+      return null;
+    }
+
     function showViewer(title, content, openUrl) {
       currentViewerUrl = openUrl || "";
       document.getElementById("viewerTitle").textContent = title;
@@ -626,14 +637,16 @@ cháy"></textarea>
     }
 
     function viewSnapshot(camera, label = "") {
-      const src = cameraSrcOrError(camera);
-      if (!src) return;
-      currentSnapshotCamera = src;
+      const item = snapshotSourceOrError(camera);
+      if (!item) return;
+      currentSnapshotCamera = item.src || item.entity_id;
       const img = document.createElement("img");
       img.id = "snapshotImage";
-      img.alt = `Snapshot ${label || src}`;
-      img.src = snapshotUrl(src);
-      showViewer(`Snapshot: ${label || src}`, img, img.src);
+      img.dataset.src = item.src;
+      img.dataset.entityId = item.entity_id;
+      img.alt = `Snapshot ${label || item.src || item.entity_id}`;
+      img.src = item.src ? snapshotUrl(item.src) : entitySnapshotUrl(item.entity_id);
+      showViewer(`Snapshot: ${label || item.src || item.entity_id}`, img, img.src);
     }
 
     function viewVideo(camera, label = "") {
@@ -649,10 +662,11 @@ cháy"></textarea>
     }
 
     function refreshSnapshot() {
-      if (!currentSnapshotCamera) return;
       const img = document.getElementById("snapshotImage");
       if (!img) return;
-      img.src = snapshotUrl(currentSnapshotCamera);
+      const src = img.dataset.src || "";
+      const entityId = img.dataset.entityId || "";
+      img.src = src ? snapshotUrl(src) : entitySnapshotUrl(entityId);
       currentViewerUrl = img.src;
     }
 
@@ -877,14 +891,17 @@ cháy"></textarea>
     }
 
     async function testCamera(camera) {
-      const src = cameraSrcOrError(camera);
-      if (!src) return;
+      const item = snapshotSourceOrError(camera);
+      if (!item) return;
       document.getElementById("result").textContent = "Running camera test...";
       try {
+        const body = item.src
+          ? {camera: item.src, entity_id: item.entity_id}
+          : {entity_id: item.entity_id};
         const {data} = await requestJson("analyze", {
           method: "POST",
           headers: {"Content-Type": "application/json"},
-          body: JSON.stringify({camera: src})
+          body: JSON.stringify(body)
         }, 90000);
         document.getElementById("result").textContent = JSON.stringify(data, null, 2);
       } catch (err) {
@@ -1120,8 +1137,10 @@ def validate_saved_options(options: dict[str, Any]) -> None:
             raise ValueError("camera entries must be objects")
         if camera.get("src"):
             validate_camera(camera["src"])
-        elif camera.get("name") or camera.get("entity_id"):
-            raise ValueError("go2rtc src is required for each camera")
+        elif camera.get("entity_id"):
+            validate_entity_id(camera["entity_id"])
+        elif camera.get("name"):
+            raise ValueError("go2rtc src or HA entity is required for each camera")
 
     for key in ("ai_timeout", "snapshot_timeout", "telegram_timeout"):
         try:
@@ -1134,7 +1153,6 @@ def validate_saved_options(options: dict[str, Any]) -> None:
 
 def validate_options(options: dict[str, Any]) -> None:
     required = [
-        "go2rtc_url",
         "ai_api_key",
         "ai_base_url",
         "ai_model",
@@ -1174,6 +1192,17 @@ def validate_camera(camera: Any) -> str:
     return camera
 
 
+def validate_entity_id(entity_id: Any) -> str:
+    if not isinstance(entity_id, str) or not entity_id.strip():
+        raise ValueError("entity_id is required")
+
+    entity_id = entity_id.strip()
+    if not re.fullmatch(r"^(camera|image)\.[A-Za-z0-9_]+$", entity_id):
+        raise ValueError("invalid Home Assistant camera entity")
+
+    return entity_id
+
+
 def fetch_snapshot(camera: str, options: dict[str, Any]) -> str:
     logger.info("Fetching snapshot for camera=%s", camera)
     base_url = options["go2rtc_url"].rstrip("/")
@@ -1201,6 +1230,53 @@ def fetch_snapshot(camera: str, options: dict[str, Any]) -> str:
         tmp.write(response.content)
 
     return tmp.name
+
+
+def fetch_hass_snapshot(entity_id: str, options: dict[str, Any]) -> str:
+    entity_id = validate_entity_id(entity_id)
+    token = os.environ.get("SUPERVISOR_TOKEN", "")
+    if not token:
+        raise ValueError("Home Assistant API is not available")
+
+    logger.info("Fetching Home Assistant snapshot for entity=%s", entity_id)
+    response = requests.get(
+        f"http://supervisor/core/api/camera_proxy/{entity_id}",
+        headers={"Authorization": f"Bearer {token}"},
+        timeout=options["snapshot_timeout"],
+    )
+    response.raise_for_status()
+
+    content_type = response.headers.get("content-type", "")
+    if "image" not in content_type and not response.content.startswith(b"\xff\xd8"):
+        raise ValueError("Home Assistant camera response is not an image")
+
+    tmp = tempfile.NamedTemporaryFile(
+        mode="wb",
+        suffix=".jpg",
+        prefix=f"simple_ai_vision_{entity_id.replace('.', '_')}_",
+        dir="/tmp",
+        delete=False,
+    )
+    with tmp:
+        tmp.write(response.content)
+
+    return tmp.name
+
+
+def fetch_snapshot_for_source(
+    camera: str | None,
+    entity_id: str | None,
+    options: dict[str, Any],
+) -> tuple[str, str]:
+    if camera:
+        camera_name = validate_camera(camera)
+        return fetch_snapshot(camera_name, options), camera_name
+
+    if entity_id:
+        entity = validate_entity_id(entity_id)
+        return fetch_hass_snapshot(entity, options), entity
+
+    raise ValueError("camera or entity_id is required")
 
 
 def image_to_data_url(path: str) -> str:
@@ -1569,15 +1645,15 @@ def events() -> JSONResponse:
 
 
 @app.get("/api/camera/frame")
-def camera_frame(camera: str) -> Response:
+def camera_frame(camera: str = "", entity_id: str = "") -> Response:
     snapshot_path = None
     try:
         options = read_options()
-        if not str(options.get("go2rtc_url", "")).strip():
-            return error_response("go2rtc_url is required", 400)
-
-        camera_name = validate_camera(camera)
-        snapshot_path = fetch_snapshot(camera_name, options)
+        snapshot_path, _ = fetch_snapshot_for_source(
+            camera.strip() or None,
+            entity_id.strip() or None,
+            options,
+        )
         with open(snapshot_path, "rb") as file:
             content = file.read()
 
@@ -1674,9 +1750,14 @@ async def analyze(request: Request) -> JSONResponse:
             return error_response("invalid JSON body", 400)
 
         options = load_options()
-        camera = validate_camera(body.get("camera"))
+        camera_value = str(body.get("camera", "")).strip()
+        entity_value = str(body.get("entity_id", "")).strip()
 
-        snapshot_path = fetch_snapshot(camera, options)
+        snapshot_path, camera = fetch_snapshot_for_source(
+            camera_value or None,
+            entity_value or None,
+            options,
+        )
         data_url = image_to_data_url(snapshot_path)
         analysis = call_ai(data_url, options)
         matched = keyword_matched(analysis, options["keyword_match"])
