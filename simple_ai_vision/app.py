@@ -157,7 +157,7 @@ INDEX_HTML = r"""
     }
     .camera-row {
       display: grid;
-      grid-template-columns: minmax(160px, 1fr) auto auto auto auto;
+      grid-template-columns: minmax(120px, 1fr) minmax(160px, 1.3fr) minmax(120px, 1fr) auto auto auto auto;
       gap: 8px;
       margin-bottom: 8px;
     }
@@ -383,22 +383,12 @@ cháy"></textarea>
 
     function buildGo2rtcUrl(camera, path, params = {}) {
       const base = document.getElementById("go2rtc_url").value.trim().replace(/\/+$/, "");
-      const query = new URLSearchParams({src: go2rtcSourceFromCamera(camera), ...params});
+      const query = new URLSearchParams({src: camera, ...params});
       return `${base}${path}?${query.toString()}`;
     }
 
     function snapshotUrl(camera) {
       return apiPath(`api/camera/frame?camera=${encodeURIComponent(camera)}&_=${Date.now()}`);
-    }
-
-    function go2rtcSourceFromCamera(camera) {
-      let source = (camera || "").trim();
-      if (source.includes(".")) {
-        source = source.split(".").slice(1).join(".");
-      }
-      source = source.replace(/^camera_/, "");
-      source = source.replace(/_go2rtc$/, "");
-      return source || camera;
     }
 
     async function requestJson(path, options = {}, timeoutMs = 45000) {
@@ -441,8 +431,26 @@ cháy"></textarea>
       const payload = {};
       fields.forEach(id => payload[id] = document.getElementById(id).value);
       payload.keyword_match = linesToList(document.getElementById("keyword_match").value);
-      payload.cameras = cameras.map(v => v.trim()).filter(Boolean);
+      payload.cameras = cameras.map(normalizeCamera).filter(camera => (
+        camera.name || camera.entity_id || camera.src
+      ));
       return payload;
+    }
+
+    function normalizeCamera(camera) {
+      if (typeof camera === "string") {
+        return {name: "", entity_id: "", src: camera.trim()};
+      }
+      return {
+        name: String(camera?.name || "").trim(),
+        entity_id: String(camera?.entity_id || "").trim(),
+        src: String(camera?.src || "").trim()
+      };
+    }
+
+    function cameraLabel(camera) {
+      const item = normalizeCamera(camera);
+      return item.name || item.entity_id || item.src || "Camera";
     }
 
     function validateTimeoutInputs() {
@@ -463,30 +471,43 @@ cháy"></textarea>
       const list = document.getElementById("cameraList");
       list.innerHTML = "";
       cameras.forEach((camera, index) => {
+        cameras[index] = normalizeCamera(camera);
+        const item = cameras[index];
         const row = document.createElement("div");
         row.className = "camera-row";
-        const input = document.createElement("input");
-        input.value = camera;
-        input.placeholder = "bep";
-        input.addEventListener("input", () => cameras[index] = input.value);
+
+        const nameInput = document.createElement("input");
+        nameInput.value = item.name;
+        nameInput.placeholder = "Display name";
+        nameInput.addEventListener("input", () => cameras[index].name = nameInput.value);
+
+        const entityInput = document.createElement("input");
+        entityInput.value = item.entity_id;
+        entityInput.placeholder = "HA entity";
+        entityInput.addEventListener("input", () => cameras[index].entity_id = entityInput.value);
+
+        const srcInput = document.createElement("input");
+        srcInput.value = item.src;
+        srcInput.placeholder = "go2rtc src, e.g. bep";
+        srcInput.addEventListener("input", () => cameras[index].src = srcInput.value);
 
         const test = document.createElement("button");
         test.className = "secondary";
         test.type = "button";
         test.textContent = "Test";
-        test.addEventListener("click", () => testCamera(input.value));
+        test.addEventListener("click", () => testCamera(srcInput.value, cameraLabel(cameras[index])));
 
         const snapshot = document.createElement("button");
         snapshot.className = "secondary";
         snapshot.type = "button";
         snapshot.textContent = "Snapshot";
-        snapshot.addEventListener("click", () => viewSnapshot(input.value));
+        snapshot.addEventListener("click", () => viewSnapshot(srcInput.value, cameraLabel(cameras[index])));
 
         const video = document.createElement("button");
         video.className = "secondary";
         video.type = "button";
         video.textContent = "Video";
-        video.addEventListener("click", () => viewVideo(input.value));
+        video.addEventListener("click", () => viewVideo(srcInput.value, cameraLabel(cameras[index])));
 
         const remove = document.createElement("button");
         remove.className = "danger";
@@ -497,18 +518,18 @@ cháy"></textarea>
           renderCameras();
         });
 
-        row.append(input, snapshot, video, test, remove);
+        row.append(nameInput, entityInput, srcInput, snapshot, video, test, remove);
         list.append(row);
       });
     }
 
-    function cameraNameOrError(camera) {
-      const name = (camera || "").trim();
-      if (!name) {
-        document.getElementById("result").textContent = "Camera name is required.";
+    function cameraSrcOrError(camera) {
+      const src = (camera || "").trim();
+      if (!src) {
+        document.getElementById("result").textContent = "go2rtc src is required.";
         return "";
       }
-      return name;
+      return src;
     }
 
     function showViewer(title, content, openUrl) {
@@ -522,27 +543,27 @@ cháy"></textarea>
       document.getElementById("viewerDialog").showModal();
     }
 
-    function viewSnapshot(camera) {
-      const name = cameraNameOrError(camera);
-      if (!name) return;
-      currentSnapshotCamera = name;
+    function viewSnapshot(camera, label = "") {
+      const src = cameraSrcOrError(camera);
+      if (!src) return;
+      currentSnapshotCamera = src;
       const img = document.createElement("img");
       img.id = "snapshotImage";
-      img.alt = `Snapshot ${name}`;
-      img.src = snapshotUrl(name);
-      showViewer(`Snapshot: ${name}`, img, img.src);
+      img.alt = `Snapshot ${label || src}`;
+      img.src = snapshotUrl(src);
+      showViewer(`Snapshot: ${label || src}`, img, img.src);
     }
 
-    function viewVideo(camera) {
-      const name = cameraNameOrError(camera);
-      if (!name) return;
+    function viewVideo(camera, label = "") {
+      const src = cameraSrcOrError(camera);
+      if (!src) return;
       currentSnapshotCamera = "";
-      const url = buildGo2rtcUrl(name, "/stream.html", {mode: "mse"});
+      const url = buildGo2rtcUrl(src, "/stream.html", {mode: "mse"});
       const frame = document.createElement("iframe");
       frame.src = url;
-      frame.title = `Video ${name}`;
+      frame.title = `Video ${label || src}`;
       frame.allow = "autoplay; fullscreen; picture-in-picture";
-      showViewer(`Video: ${name}`, frame, url);
+      showViewer(`Video: ${label || src}`, frame, url);
     }
 
     function refreshSnapshot() {
@@ -563,11 +584,11 @@ cháy"></textarea>
 
       entities.forEach(entity => {
         const option = document.createElement("option");
-        option.value = entity.source || entity.entity_id;
-        option.dataset.entityId = entity.entity_id;
+        option.value = entity.entity_id;
+        option.dataset.name = entity.name || "";
         option.textContent = entity.name
-          ? `${entity.name} -> ${entity.source} (${entity.entity_id})`
-          : `${entity.entity_id} -> ${entity.source}`;
+          ? `${entity.name} (${entity.entity_id})`
+          : entity.entity_id;
         select.append(option);
       });
     }
@@ -594,10 +615,14 @@ cháy"></textarea>
         setStatus("entityStatus", "Select an entity first, or use Add Camera for manual input.", "err");
         return;
       }
-      cameras.push(value);
+      const selected = select.selectedOptions[0];
+      cameras.push({
+        name: selected?.dataset.name || "",
+        entity_id: value,
+        src: ""
+      });
       renderCameras();
-      const entityId = select.selectedOptions[0]?.dataset.entityId || value;
-      setStatus("entityStatus", `Added ${value} from ${entityId}`, "ok");
+      setStatus("entityStatus", `Added ${value}. Fill go2rtc src before testing.`, "ok");
     }
 
     async function loadConfig() {
@@ -651,14 +676,14 @@ cháy"></textarea>
     }
 
     async function testCamera(camera) {
-      const name = cameraNameOrError(camera);
-      if (!name) return;
+      const src = cameraSrcOrError(camera);
+      if (!src) return;
       document.getElementById("result").textContent = "Running camera test...";
       try {
         const {data} = await requestJson("analyze", {
           method: "POST",
           headers: {"Content-Type": "application/json"},
-          body: JSON.stringify({camera: name})
+          body: JSON.stringify({camera: src})
         }, 90000);
         document.getElementById("result").textContent = JSON.stringify(data, null, 2);
       } catch (err) {
@@ -702,7 +727,7 @@ cháy"></textarea>
     document.getElementById("loadEntitiesBtn").addEventListener("click", loadHaEntities);
     document.getElementById("addEntityBtn").addEventListener("click", addSelectedEntity);
     document.getElementById("addCameraBtn").addEventListener("click", () => {
-      cameras.push("");
+      cameras.push({name: "", entity_id: "", src: ""});
       renderCameras();
     });
     document.getElementById("closeViewerBtn").addEventListener("click", () => {
@@ -849,17 +874,33 @@ def normalize_options(options: dict[str, Any]) -> None:
 
     if not isinstance(options.get("cameras"), list):
         options["cameras"] = []
-    options["cameras"] = [
-        str(item).strip()
-        for item in options.get("cameras", [])
-        if str(item).strip()
-    ]
+    options["cameras"] = normalize_camera_list(options.get("cameras", []))
 
     for key in ("ai_timeout", "snapshot_timeout", "telegram_timeout"):
         try:
             options[key] = int(options.get(key, 1))
         except (TypeError, ValueError):
             options[key] = 1
+
+
+def normalize_camera_list(cameras: list[Any]) -> list[dict[str, str]]:
+    normalized = []
+    for camera in cameras:
+        if isinstance(camera, str):
+            item = {"name": "", "entity_id": "", "src": camera.strip()}
+        elif isinstance(camera, dict):
+            item = {
+                "name": str(camera.get("name", "")).strip(),
+                "entity_id": str(camera.get("entity_id", "")).strip(),
+                "src": str(camera.get("src", "")).strip(),
+            }
+        else:
+            continue
+
+        if item["name"] or item["entity_id"] or item["src"]:
+            normalized.append(item)
+
+    return normalized
 
 
 def validate_saved_options(options: dict[str, Any]) -> None:
@@ -870,7 +911,12 @@ def validate_saved_options(options: dict[str, Any]) -> None:
         raise ValueError("cameras must be a list")
 
     for camera in options["cameras"]:
-        validate_camera(camera)
+        if not isinstance(camera, dict):
+            raise ValueError("camera entries must be objects")
+        if camera.get("src"):
+            validate_camera(camera["src"])
+        elif camera.get("name") or camera.get("entity_id"):
+            raise ValueError("go2rtc src is required for each camera")
 
     for key in ("ai_timeout", "snapshot_timeout", "telegram_timeout"):
         try:
@@ -923,29 +969,14 @@ def validate_camera(camera: Any) -> str:
     return camera
 
 
-def go2rtc_source_from_camera(camera: str) -> str:
-    source = camera.strip()
-    if "." in source:
-        source = source.split(".", 1)[1]
-
-    if source.startswith("camera_"):
-        source = source[len("camera_") :]
-
-    if source.endswith("_go2rtc"):
-        source = source[: -len("_go2rtc")]
-
-    return source or camera
-
-
 def fetch_snapshot(camera: str, options: dict[str, Any]) -> str:
-    source = go2rtc_source_from_camera(camera)
-    logger.info("Fetching snapshot for camera=%s src=%s", camera, source)
+    logger.info("Fetching snapshot for camera=%s", camera)
     base_url = options["go2rtc_url"].rstrip("/")
     url = f"{base_url}/api/frame.jpeg"
 
     response = requests.get(
         url,
-        params={"src": source},
+        params={"src": camera},
         timeout=options["snapshot_timeout"],
     )
     response.raise_for_status()
@@ -1182,8 +1213,7 @@ def get_hass_camera_entities() -> list[dict[str, str]]:
         if isinstance(attributes, dict):
             name = str(attributes.get("friendly_name", "")).strip()
 
-        source = go2rtc_source_from_camera(entity_id)
-        entities.append({"entity_id": entity_id, "name": name, "source": source})
+        entities.append({"entity_id": entity_id, "name": name})
 
     return sorted(entities, key=lambda entity: entity["entity_id"])
 
