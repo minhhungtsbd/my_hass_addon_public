@@ -10,6 +10,7 @@ Simple AI Vision là Home Assistant Add-on tối giản để phân tích snapsh
 - Match keyword case-insensitive, hỗ trợ regex.
 - Gửi Telegram bằng Bot API `sendPhoto`.
 - Web UI đơn giản để chỉnh cấu hình và test nhiều camera.
+- Có nút test AI API riêng trước khi test camera.
 - Không database, không MQTT, không video streaming, không frontend SPA.
 
 ## Cài Đặt
@@ -138,6 +139,7 @@ Config API dùng bởi Web UI:
 ```http
 GET /api/config
 POST /api/config
+POST /api/test-ai
 ```
 
 Endpoint:

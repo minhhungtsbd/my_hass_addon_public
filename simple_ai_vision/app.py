@@ -232,6 +232,7 @@ cháy"></textarea>
       </div>
       <div class="actions">
         <button id="saveBtn" type="button">Save Configuration</button>
+        <button class="secondary" id="testAiBtn" type="button">Test AI API</button>
         <span id="configStatus" class="status"></span>
       </div>
     </section>
@@ -259,6 +260,33 @@ cháy"></textarea>
     ];
     let cameras = [];
 
+    function apiPath(path) {
+      const base = window.location.pathname.endsWith("/")
+        ? window.location.pathname
+        : window.location.pathname + "/";
+      return base + path.replace(/^\/+/, "");
+    }
+
+    async function requestJson(path, options = {}, timeoutMs = 45000) {
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), timeoutMs);
+      try {
+        const response = await fetch(apiPath(path), {
+          ...options,
+          signal: controller.signal
+        });
+        let data = {};
+        try {
+          data = await response.json();
+        } catch (err) {
+          data = {success: false, error: "invalid JSON response"};
+        }
+        return {response, data};
+      } finally {
+        clearTimeout(timer);
+      }
+    }
+
     function linesToList(value) {
       return value.split("\n").map(v => v.trim()).filter(Boolean);
     }
@@ -267,6 +295,28 @@ cháy"></textarea>
       const el = document.getElementById(id);
       el.textContent = text || "";
       el.className = "status" + (type ? " " + type : "");
+    }
+
+    function buildConfigPayload() {
+      const payload = {};
+      fields.forEach(id => payload[id] = document.getElementById(id).value);
+      payload.keyword_match = linesToList(document.getElementById("keyword_match").value);
+      payload.cameras = cameras.map(v => v.trim()).filter(Boolean);
+      return payload;
+    }
+
+    function validateTimeoutInputs() {
+      const labels = {
+        ai_timeout: "AI Timeout",
+        snapshot_timeout: "Snapshot Timeout",
+        telegram_timeout: "Telegram Timeout"
+      };
+      for (const id of Object.keys(labels)) {
+        const value = document.getElementById(id).value.trim();
+        if (!/^[1-9][0-9]*$/.test(value)) {
+          throw new Error(`${labels[id]} must be a positive integer.`);
+        }
+      }
     }
 
     function renderCameras() {
@@ -301,56 +351,103 @@ cháy"></textarea>
     }
 
     async function loadConfig() {
-      setStatus("configStatus", "Loading...", "");
-      const response = await fetch("/api/config");
-      const data = await response.json();
-      if (!response.ok || !data.success) {
-        setStatus("configStatus", data.error || "Could not load config", "err");
-        return;
+      try {
+        setStatus("configStatus", "Loading...", "");
+        const {response, data} = await requestJson("api/config", {}, 15000);
+        if (!response.ok || !data.success) {
+          setStatus("configStatus", data.error || "Could not load config", "err");
+          return;
+        }
+        const config = data.config;
+        fields.forEach(id => document.getElementById(id).value = config[id] ?? "");
+        document.getElementById("keyword_match").value = (config.keyword_match || []).join("\n");
+        cameras = config.cameras || [];
+        renderCameras();
+        setStatus("configStatus", "Loaded", "ok");
+      } catch (err) {
+        setStatus("configStatus", err.name === "AbortError" ? "Load timeout" : err.message, "err");
       }
-      const config = data.config;
-      fields.forEach(id => document.getElementById(id).value = config[id] ?? "");
-      document.getElementById("keyword_match").value = (config.keyword_match || []).join("\n");
-      cameras = config.cameras || [];
-      renderCameras();
-      setStatus("configStatus", "Loaded", "ok");
     }
 
     async function saveConfig() {
-      const payload = {};
-      fields.forEach(id => payload[id] = document.getElementById(id).value);
-      payload.keyword_match = linesToList(document.getElementById("keyword_match").value);
-      payload.cameras = cameras.map(v => v.trim()).filter(Boolean);
-
-      setStatus("configStatus", "Saving...", "");
-      const response = await fetch("/api/config", {
-        method: "POST",
-        headers: {"Content-Type": "application/json"},
-        body: JSON.stringify(payload)
-      });
-      const data = await response.json();
-      if (!response.ok || !data.success) {
-        setStatus("configStatus", data.error || "Save failed", "err");
-        return;
+      let payload;
+      try {
+        validateTimeoutInputs();
+        payload = buildConfigPayload();
+      } catch (err) {
+        setStatus("configStatus", err.message, "err");
+        return null;
       }
-      cameras = data.config.cameras || [];
-      renderCameras();
-      setStatus("configStatus", "Saved", "ok");
+
+      try {
+        setStatus("configStatus", "Saving...", "");
+        const {response, data} = await requestJson("api/config", {
+          method: "POST",
+          headers: {"Content-Type": "application/json"},
+          body: JSON.stringify(payload)
+        }, 20000);
+        if (!response.ok || !data.success) {
+          setStatus("configStatus", data.error || "Save failed", "err");
+          return null;
+        }
+        cameras = data.config.cameras || [];
+        renderCameras();
+        setStatus("configStatus", "Saved", "ok");
+        return data.config;
+      } catch (err) {
+        setStatus("configStatus", err.name === "AbortError" ? "Save timeout" : err.message, "err");
+        return null;
+      }
     }
 
     async function testCamera(camera) {
-      document.getElementById("result").textContent = "Running...";
-      const response = await fetch("/analyze", {
-        method: "POST",
-        headers: {"Content-Type": "application/json"},
-        body: JSON.stringify({camera})
-      });
-      const data = await response.json();
-      document.getElementById("result").textContent = JSON.stringify(data, null, 2);
+      const name = (camera || "").trim();
+      if (!name) {
+        document.getElementById("result").textContent = "Camera name is required.";
+        return;
+      }
+      document.getElementById("result").textContent = "Running camera test...";
+      try {
+        const {data} = await requestJson("analyze", {
+          method: "POST",
+          headers: {"Content-Type": "application/json"},
+          body: JSON.stringify({camera: name})
+        }, 90000);
+        document.getElementById("result").textContent = JSON.stringify(data, null, 2);
+      } catch (err) {
+        document.getElementById("result").textContent =
+          err.name === "AbortError" ? "Camera test timeout." : `Camera test error: ${err.message}`;
+      }
+    }
+
+    async function testAiApi() {
+      try {
+        validateTimeoutInputs();
+      } catch (err) {
+        setStatus("configStatus", err.message, "err");
+        document.getElementById("result").textContent = err.message;
+        return;
+      }
+      document.getElementById("result").textContent = "Running AI API test...";
+      setStatus("configStatus", "Testing AI API...", "");
+      try {
+        const {response, data} = await requestJson("api/test-ai", {
+          method: "POST",
+          headers: {"Content-Type": "application/json"},
+          body: JSON.stringify(buildConfigPayload())
+        }, 60000);
+        document.getElementById("result").textContent = JSON.stringify(data, null, 2);
+        setStatus("configStatus", response.ok && data.success ? "AI API OK" : "AI API failed", response.ok && data.success ? "ok" : "err");
+      } catch (err) {
+        const message = err.name === "AbortError" ? "AI API test timeout." : `AI API test error: ${err.message}`;
+        document.getElementById("result").textContent = message;
+        setStatus("configStatus", message, "err");
+      }
     }
 
     document.getElementById("reloadBtn").addEventListener("click", loadConfig);
     document.getElementById("saveBtn").addEventListener("click", saveConfig);
+    document.getElementById("testAiBtn").addEventListener("click", testAiApi);
     document.getElementById("addCameraBtn").addEventListener("click", () => {
       cameras.push("");
       renderCameras();
@@ -481,6 +578,21 @@ def validate_options(options: dict[str, Any]) -> None:
             raise ValueError(f"{key} must be greater than 0")
 
 
+def validate_ai_options(options: dict[str, Any]) -> None:
+    required = ["ai_api_key", "ai_base_url", "ai_model"]
+    missing = [key for key in required if not str(options.get(key, "")).strip()]
+    if missing:
+        raise ValueError(f"Missing required AI option(s): {', '.join(missing)}")
+
+    try:
+        options["ai_timeout"] = int(options.get("ai_timeout", 30))
+    except (TypeError, ValueError) as exc:
+        raise ValueError("ai_timeout must be an integer") from exc
+
+    if options["ai_timeout"] < 1:
+        raise ValueError("ai_timeout must be greater than 0")
+
+
 def validate_camera(camera: Any) -> str:
     if not isinstance(camera, str) or not camera.strip():
         raise ValueError("camera is required")
@@ -527,6 +639,19 @@ def image_to_data_url(path: str) -> str:
     return f"data:image/jpeg;base64,{encoded}"
 
 
+def parse_ai_content(data: dict[str, Any]) -> str:
+    try:
+        content = data["choices"][0]["message"]["content"]
+    except (KeyError, IndexError, TypeError) as exc:
+        raise ValueError("invalid AI API response") from exc
+
+    if isinstance(content, list):
+        text_parts = [part.get("text", "") for part in content if isinstance(part, dict)]
+        content = "\n".join(part for part in text_parts if part)
+
+    return str(content).strip()
+
+
 def call_ai(data_url: str, options: dict[str, Any]) -> str:
     logger.info("Sending AI vision request")
     url = f"{options['ai_base_url'].rstrip('/')}/chat/completions"
@@ -556,17 +681,35 @@ def call_ai(data_url: str, options: dict[str, Any]) -> str:
     )
     response.raise_for_status()
     data = response.json()
+    return parse_ai_content(data)
 
-    try:
-        content = data["choices"][0]["message"]["content"]
-    except (KeyError, IndexError, TypeError) as exc:
-        raise ValueError("invalid AI API response") from exc
 
-    if isinstance(content, list):
-        text_parts = [part.get("text", "") for part in content if isinstance(part, dict)]
-        content = "\n".join(part for part in text_parts if part)
+def call_ai_text(options: dict[str, Any]) -> str:
+    logger.info("Sending AI API test request")
+    url = f"{options['ai_base_url'].rstrip('/')}/chat/completions"
+    payload = {
+        "model": options["ai_model"],
+        "messages": [
+            {
+                "role": "user",
+                "content": "Reply with OK only.",
+            }
+        ],
+        "temperature": 0,
+    }
+    headers = {
+        "Authorization": f"Bearer {options['ai_api_key']}",
+        "Content-Type": "application/json",
+    }
 
-    return str(content).strip()
+    response = requests.post(
+        url,
+        headers=headers,
+        json=payload,
+        timeout=options["ai_timeout"],
+    )
+    response.raise_for_status()
+    return parse_ai_content(response.json())
 
 
 def keyword_matched(analysis: str, keywords: list[Any]) -> bool:
@@ -649,6 +792,40 @@ async def update_config(request: Request) -> JSONResponse:
     except OSError as exc:
         logger.error("Could not save config: %s", exc)
         return error_response("could not save config", 500)
+
+
+@app.post("/api/test-ai")
+async def test_ai(request: Request) -> JSONResponse:
+    try:
+        options = read_options()
+        try:
+            body = await request.json()
+        except json.JSONDecodeError:
+            body = {}
+        if isinstance(body, dict):
+            options.update(body)
+            normalize_options(options)
+        validate_ai_options(options)
+        result = call_ai_text(options)
+        return JSONResponse(
+            {
+                "success": True,
+                "message": "AI API reachable",
+                "result": result,
+            }
+        )
+    except ValueError as exc:
+        logger.error("%s", exc)
+        return error_response(str(exc), 400)
+    except requests.Timeout:
+        logger.error("AI API test timeout")
+        return error_response("AI API timeout", 504)
+    except requests.RequestException as exc:
+        logger.error("AI API test network error: %s", exc)
+        return error_response("AI API network error", 502)
+    except Exception:
+        logger.exception("Unexpected AI API test error")
+        return error_response("internal error", 500)
 
 
 @app.post("/analyze")

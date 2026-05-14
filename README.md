@@ -23,7 +23,7 @@ Add-on hiện có:
 
 | Add-on | Mô tả |
 | --- | --- |
-| [Simple AI Vision](./simple_ai_vision) | Phân tích ảnh JPEG từ go2rtc bằng AI Vision API, có Web UI cấu hình cơ bản và gửi Telegram khi khớp keyword |
+| [Simple AI Vision](./simple_ai_vision) | Phân tích ảnh JPEG từ go2rtc bằng AI Vision API, có Web UI cấu hình cơ bản, test AI API và gửi Telegram khi khớp keyword |
 
 ## Cài Đặt Repository
 
