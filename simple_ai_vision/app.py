@@ -11,7 +11,8 @@ from fastapi import FastAPI, Request
 from fastapi.responses import HTMLResponse, JSONResponse
 
 
-OPTIONS_PATH = "/data/options.json"
+SUPERVISOR_OPTIONS_PATH = "/data/options.json"
+UI_OPTIONS_PATH = "/data/simple_ai_vision_config.json"
 DEFAULT_PROMPT = (
     "B\u1ea1n \u0111ang ph\u00e2n t\u00edch \u1ea3nh camera an ninh.\n"
     "Ch\u1ec9 m\u00f4 t\u1ea3 c\u00e1c s\u1ef1 ki\u1ec7n quan tr\u1ecdng li\u00ean quan \u0111\u1ebfn an ninh.\n"
@@ -544,10 +545,12 @@ def default_options() -> dict[str, Any]:
 def read_options() -> dict[str, Any]:
     options = default_options()
 
-    if os.path.exists(OPTIONS_PATH):
-        with open(OPTIONS_PATH, "r", encoding="utf-8") as file:
-            data = json.load(file)
-        options.update(data)
+    for path in (SUPERVISOR_OPTIONS_PATH, UI_OPTIONS_PATH):
+        if os.path.exists(path):
+            with open(path, "r", encoding="utf-8") as file:
+                data = json.load(file)
+            if isinstance(data, dict):
+                options.update(data)
 
     normalize_options(options)
     return options
@@ -559,17 +562,27 @@ def load_options() -> dict[str, Any]:
     return options
 
 
+def merge_user_options(current: dict[str, Any], incoming: dict[str, Any]) -> dict[str, Any]:
+    merged = dict(current)
+    cleaned = dict(incoming)
+    for secret_key in ("ai_api_key", "telegram_bot_token"):
+        if secret_key in cleaned and not str(cleaned.get(secret_key, "")).strip():
+            cleaned.pop(secret_key)
+    merged.update(cleaned)
+    return merged
+
+
 def save_options(options: dict[str, Any]) -> dict[str, Any]:
     current = read_options()
-    current.update(options)
+    current = merge_user_options(current, options)
     normalize_options(current)
     validate_options(current)
 
-    os.makedirs(os.path.dirname(OPTIONS_PATH), exist_ok=True)
-    tmp_path = f"{OPTIONS_PATH}.tmp"
+    os.makedirs(os.path.dirname(UI_OPTIONS_PATH), exist_ok=True)
+    tmp_path = f"{UI_OPTIONS_PATH}.tmp"
     with open(tmp_path, "w", encoding="utf-8") as file:
         json.dump(current, file, ensure_ascii=False, indent=2)
-    os.replace(tmp_path, OPTIONS_PATH)
+    os.replace(tmp_path, UI_OPTIONS_PATH)
     return current
 
 
@@ -702,6 +715,22 @@ def parse_ai_content(data: dict[str, Any]) -> str:
     return str(content).strip()
 
 
+def response_json(response: requests.Response, service: str) -> dict[str, Any]:
+    try:
+        data = response.json()
+    except ValueError as exc:
+        body = response.text[:1000]
+        raise ValueError(
+            f"{service} returned non-JSON response "
+            f"(status={response.status_code}, body={body!r})"
+        ) from exc
+
+    if not isinstance(data, dict):
+        raise ValueError(f"{service} returned invalid JSON payload")
+
+    return data
+
+
 def call_ai(data_url: str, options: dict[str, Any]) -> str:
     logger.info("Sending AI vision request")
     url = f"{options['ai_base_url'].rstrip('/')}/chat/completions"
@@ -730,7 +759,7 @@ def call_ai(data_url: str, options: dict[str, Any]) -> str:
         timeout=options["ai_timeout"],
     )
     response.raise_for_status()
-    data = response.json()
+    data = response_json(response, "AI API")
     return parse_ai_content(data)
 
 
@@ -759,7 +788,7 @@ def call_ai_text(options: dict[str, Any]) -> str:
         timeout=options["ai_timeout"],
     )
     response.raise_for_status()
-    return parse_ai_content(response.json())
+    return parse_ai_content(response_json(response, "AI API"))
 
 
 def keyword_matched(analysis: str, keywords: list[Any]) -> bool:
@@ -853,7 +882,7 @@ async def test_ai(request: Request) -> JSONResponse:
         except json.JSONDecodeError:
             body = {}
         if isinstance(body, dict):
-            options.update(body)
+            options = merge_user_options(options, body)
             normalize_options(options)
         validate_ai_options(options)
         result = call_ai_text(options)
