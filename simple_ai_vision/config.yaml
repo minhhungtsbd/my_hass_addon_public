@@ -1,5 +1,5 @@
 name: Simple AI Vision
-version: "1.2.4"
+version: "1.2.5"
 slug: simple_ai_vision
 description: Lightweight AI camera snapshot analyzer using go2rtc and Telegram alerts
 url: "https://github.com/minhhungtsbd/my_hass_addon_public/tree/main/simple_ai_vision"
@@ -12,6 +12,7 @@ init: false
 host_network: false
 ingress: true
 ingress_port: 8000
+homeassistant_api: true
 panel_icon: mdi:cctv
 webui: "http://[HOST]:[PORT:8000]/"
 ports:

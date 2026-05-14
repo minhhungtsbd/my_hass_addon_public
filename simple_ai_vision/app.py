@@ -161,6 +161,21 @@ INDEX_HTML = r"""
       gap: 8px;
       margin-bottom: 8px;
     }
+    .entity-picker {
+      display: grid;
+      grid-template-columns: minmax(180px, 1fr) auto auto;
+      gap: 8px;
+      margin: 12px 0 14px;
+    }
+    select {
+      width: 100%;
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      padding: 10px;
+      background: var(--panel);
+      color: var(--text);
+      font: inherit;
+    }
     .viewer {
       border: 0;
       padding: 0;
@@ -217,7 +232,7 @@ INDEX_HTML = r"""
     @media (max-width: 720px) {
       main { padding: 16px; }
       header { align-items: flex-start; flex-direction: column; }
-      .grid, .camera-row { grid-template-columns: 1fr; }
+      .grid, .camera-row, .entity-picker { grid-template-columns: 1fr; }
       .tabs { overflow-x: auto; }
     }
   </style>
@@ -305,6 +320,14 @@ cháy"></textarea>
     <section class="panel tab-panel active" id="camerasPanel">
       <h2>Cameras</h2>
       <div class="hint">Nhập đúng tên stream trong go2rtc, ví dụ <code>bep</code>. Addon sẽ gọi <code>{go2rtc_url}/api/frame.jpeg?src=bep</code>.</div>
+      <div class="entity-picker">
+        <select id="haEntitySelect">
+          <option value="">Load Home Assistant camera entities...</option>
+        </select>
+        <button class="secondary" id="loadEntitiesBtn" type="button">Load Entities</button>
+        <button class="secondary" id="addEntityBtn" type="button">Add Selected</button>
+      </div>
+      <div id="entityStatus" class="status"></div>
       <div id="cameraList"></div>
       <div class="actions">
         <button class="secondary" id="addCameraBtn" type="button">Add Camera</button>
@@ -322,6 +345,7 @@ cháy"></textarea>
         <div class="viewer-head">
           <div class="viewer-title" id="viewerTitle">Camera</div>
           <div class="actions">
+            <button class="secondary" id="refreshViewerBtn" type="button">Refresh</button>
             <button class="secondary" id="openViewerBtn" type="button">Open Tab</button>
             <button class="secondary" id="closeViewerBtn" type="button">Close</button>
           </div>
@@ -339,6 +363,7 @@ cháy"></textarea>
     ];
     let cameras = [];
     let currentViewerUrl = "";
+    let currentSnapshotCamera = "";
 
     function apiPath(path) {
       const base = window.location.pathname.endsWith("/")
@@ -360,6 +385,10 @@ cháy"></textarea>
       const base = document.getElementById("go2rtc_url").value.trim().replace(/\/+$/, "");
       const query = new URLSearchParams({src: camera, ...params});
       return `${base}${path}?${query.toString()}`;
+    }
+
+    function snapshotUrl(camera) {
+      return apiPath(`api/camera/frame?camera=${encodeURIComponent(camera)}&_=${Date.now()}`);
     }
 
     async function requestJson(path, options = {}, timeoutMs = 45000) {
@@ -479,27 +508,81 @@ cháy"></textarea>
       body.innerHTML = "";
       body.append(content);
       document.getElementById("openViewerBtn").style.display = currentViewerUrl ? "" : "none";
+      document.getElementById("refreshViewerBtn").style.display = currentSnapshotCamera ? "" : "none";
       document.getElementById("viewerDialog").showModal();
     }
 
     function viewSnapshot(camera) {
       const name = cameraNameOrError(camera);
       if (!name) return;
+      currentSnapshotCamera = name;
       const img = document.createElement("img");
+      img.id = "snapshotImage";
       img.alt = `Snapshot ${name}`;
-      img.src = apiPath(`api/camera/frame?camera=${encodeURIComponent(name)}&_=${Date.now()}`);
+      img.src = snapshotUrl(name);
       showViewer(`Snapshot: ${name}`, img, img.src);
     }
 
     function viewVideo(camera) {
       const name = cameraNameOrError(camera);
       if (!name) return;
+      currentSnapshotCamera = "";
       const url = buildGo2rtcUrl(name, "/stream.html", {mode: "mse"});
       const frame = document.createElement("iframe");
       frame.src = url;
       frame.title = `Video ${name}`;
       frame.allow = "autoplay; fullscreen; picture-in-picture";
       showViewer(`Video: ${name}`, frame, url);
+    }
+
+    function refreshSnapshot() {
+      if (!currentSnapshotCamera) return;
+      const img = document.getElementById("snapshotImage");
+      if (!img) return;
+      img.src = snapshotUrl(currentSnapshotCamera);
+      currentViewerUrl = img.src;
+    }
+
+    function renderHaEntities(entities) {
+      const select = document.getElementById("haEntitySelect");
+      select.innerHTML = "";
+      const empty = document.createElement("option");
+      empty.value = "";
+      empty.textContent = entities.length ? "Select Home Assistant entity" : "No camera entities found";
+      select.append(empty);
+
+      entities.forEach(entity => {
+        const option = document.createElement("option");
+        option.value = entity.entity_id;
+        option.textContent = entity.name ? `${entity.name} (${entity.entity_id})` : entity.entity_id;
+        select.append(option);
+      });
+    }
+
+    async function loadHaEntities() {
+      setStatus("entityStatus", "Loading Home Assistant entities...", "");
+      try {
+        const {response, data} = await requestJson("api/hass/cameras", {}, 15000);
+        if (!response.ok || !data.success) {
+          setStatus("entityStatus", data.error || "Could not load Home Assistant entities", "err");
+          return;
+        }
+        renderHaEntities(data.entities || []);
+        setStatus("entityStatus", `Loaded ${(data.entities || []).length} camera entities`, "ok");
+      } catch (err) {
+        setStatus("entityStatus", err.name === "AbortError" ? "Entity load timeout" : err.message, "err");
+      }
+    }
+
+    function addSelectedEntity() {
+      const value = document.getElementById("haEntitySelect").value.trim();
+      if (!value) {
+        setStatus("entityStatus", "Select an entity first, or use Add Camera for manual input.", "err");
+        return;
+      }
+      cameras.push(value);
+      renderCameras();
+      setStatus("entityStatus", `Added ${value}`, "ok");
     }
 
     async function loadConfig() {
@@ -601,6 +684,8 @@ cháy"></textarea>
     document.getElementById("saveBtn").addEventListener("click", saveConfig);
     document.getElementById("testAiBtn").addEventListener("click", testAiApi);
     document.getElementById("saveCamerasBtn").addEventListener("click", saveConfig);
+    document.getElementById("loadEntitiesBtn").addEventListener("click", loadHaEntities);
+    document.getElementById("addEntityBtn").addEventListener("click", addSelectedEntity);
     document.getElementById("addCameraBtn").addEventListener("click", () => {
       cameras.push("");
       renderCameras();
@@ -608,10 +693,12 @@ cháy"></textarea>
     document.getElementById("closeViewerBtn").addEventListener("click", () => {
       document.getElementById("viewerDialog").close();
       document.getElementById("viewerBody").innerHTML = "";
+      currentSnapshotCamera = "";
     });
     document.getElementById("openViewerBtn").addEventListener("click", () => {
       if (currentViewerUrl) window.open(currentViewerUrl, "_blank", "noopener");
     });
+    document.getElementById("refreshViewerBtn").addEventListener("click", refreshSnapshot);
     loadConfig();
   </script>
 </body>
@@ -1030,6 +1117,46 @@ def cleanup_file(path: str | None) -> None:
             logger.warning("Could not remove temp file: %s", path)
 
 
+def get_hass_camera_entities() -> list[dict[str, str]]:
+    token = os.environ.get("SUPERVISOR_TOKEN", "")
+    if not token:
+        raise ValueError("Home Assistant API is not available")
+
+    response = requests.get(
+        "http://supervisor/core/api/states",
+        headers={"Authorization": f"Bearer {token}"},
+        timeout=10,
+    )
+    response.raise_for_status()
+
+    try:
+        states = response.json()
+    except ValueError as exc:
+        raise ValueError("Home Assistant returned non-JSON response") from exc
+
+    if not isinstance(states, list):
+        raise ValueError("Home Assistant returned invalid states payload")
+
+    entities: list[dict[str, str]] = []
+    for item in states:
+        if not isinstance(item, dict):
+            continue
+
+        entity_id = str(item.get("entity_id", "")).strip()
+        domain = entity_id.split(".", 1)[0]
+        if domain not in ("camera", "image"):
+            continue
+
+        attributes = item.get("attributes", {})
+        name = ""
+        if isinstance(attributes, dict):
+            name = str(attributes.get("friendly_name", "")).strip()
+
+        entities.append({"entity_id": entity_id, "name": name})
+
+    return sorted(entities, key=lambda entity: entity["entity_id"])
+
+
 @app.get("/health")
 def health() -> dict[str, bool]:
     return {"success": True}
@@ -1047,6 +1174,24 @@ def get_config() -> JSONResponse:
     except (OSError, json.JSONDecodeError) as exc:
         logger.error("Could not read config: %s", exc)
         return error_response("could not read config", 500)
+
+
+@app.get("/api/hass/cameras")
+def hass_cameras() -> JSONResponse:
+    try:
+        return JSONResponse({"success": True, "entities": get_hass_camera_entities()})
+    except ValueError as exc:
+        logger.error("%s", exc)
+        return error_response(str(exc), 400)
+    except requests.Timeout:
+        logger.error("Home Assistant entity load timeout")
+        return JSONResponse({"success": False, "error": "Home Assistant API timeout"})
+    except requests.HTTPError as exc:
+        logger.error("Home Assistant API HTTP error: %s", exc)
+        return upstream_error_response(exc)
+    except requests.RequestException as exc:
+        logger.error("Home Assistant API network error: %s", exc)
+        return JSONResponse({"success": False, "error": "Home Assistant API network error", "details": str(exc)})
 
 
 @app.get("/api/camera/frame")
