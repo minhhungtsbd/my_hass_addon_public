@@ -383,12 +383,22 @@ cháy"></textarea>
 
     function buildGo2rtcUrl(camera, path, params = {}) {
       const base = document.getElementById("go2rtc_url").value.trim().replace(/\/+$/, "");
-      const query = new URLSearchParams({src: camera, ...params});
+      const query = new URLSearchParams({src: go2rtcSourceFromCamera(camera), ...params});
       return `${base}${path}?${query.toString()}`;
     }
 
     function snapshotUrl(camera) {
       return apiPath(`api/camera/frame?camera=${encodeURIComponent(camera)}&_=${Date.now()}`);
+    }
+
+    function go2rtcSourceFromCamera(camera) {
+      let source = (camera || "").trim();
+      if (source.includes(".")) {
+        source = source.split(".").slice(1).join(".");
+      }
+      source = source.replace(/^camera_/, "");
+      source = source.replace(/_go2rtc$/, "");
+      return source || camera;
     }
 
     async function requestJson(path, options = {}, timeoutMs = 45000) {
@@ -553,8 +563,11 @@ cháy"></textarea>
 
       entities.forEach(entity => {
         const option = document.createElement("option");
-        option.value = entity.entity_id;
-        option.textContent = entity.name ? `${entity.name} (${entity.entity_id})` : entity.entity_id;
+        option.value = entity.source || entity.entity_id;
+        option.dataset.entityId = entity.entity_id;
+        option.textContent = entity.name
+          ? `${entity.name} -> ${entity.source} (${entity.entity_id})`
+          : `${entity.entity_id} -> ${entity.source}`;
         select.append(option);
       });
     }
@@ -575,14 +588,16 @@ cháy"></textarea>
     }
 
     function addSelectedEntity() {
-      const value = document.getElementById("haEntitySelect").value.trim();
+      const select = document.getElementById("haEntitySelect");
+      const value = select.value.trim();
       if (!value) {
         setStatus("entityStatus", "Select an entity first, or use Add Camera for manual input.", "err");
         return;
       }
       cameras.push(value);
       renderCameras();
-      setStatus("entityStatus", `Added ${value}`, "ok");
+      const entityId = select.selectedOptions[0]?.dataset.entityId || value;
+      setStatus("entityStatus", `Added ${value} from ${entityId}`, "ok");
     }
 
     async function loadConfig() {
@@ -908,14 +923,29 @@ def validate_camera(camera: Any) -> str:
     return camera
 
 
+def go2rtc_source_from_camera(camera: str) -> str:
+    source = camera.strip()
+    if "." in source:
+        source = source.split(".", 1)[1]
+
+    if source.startswith("camera_"):
+        source = source[len("camera_") :]
+
+    if source.endswith("_go2rtc"):
+        source = source[: -len("_go2rtc")]
+
+    return source or camera
+
+
 def fetch_snapshot(camera: str, options: dict[str, Any]) -> str:
-    logger.info("Fetching snapshot for camera=%s", camera)
+    source = go2rtc_source_from_camera(camera)
+    logger.info("Fetching snapshot for camera=%s src=%s", camera, source)
     base_url = options["go2rtc_url"].rstrip("/")
     url = f"{base_url}/api/frame.jpeg"
 
     response = requests.get(
         url,
-        params={"src": camera},
+        params={"src": source},
         timeout=options["snapshot_timeout"],
     )
     response.raise_for_status()
@@ -1152,7 +1182,8 @@ def get_hass_camera_entities() -> list[dict[str, str]]:
         if isinstance(attributes, dict):
             name = str(attributes.get("friendly_name", "")).strip()
 
-        entities.append({"entity_id": entity_id, "name": name})
+        source = go2rtc_source_from_camera(entity_id)
+        entities.append({"entity_id": entity_id, "name": name, "source": source})
 
     return sorted(entities, key=lambda entity: entity["entity_id"])
 
