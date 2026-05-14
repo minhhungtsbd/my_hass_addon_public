@@ -157,6 +157,15 @@ INDEX_HTML = r"""
       color: var(--danger);
       background: transparent;
     }
+    .camera-head {
+      display: grid;
+      grid-template-columns: minmax(120px, 1fr) minmax(160px, 1.3fr) minmax(120px, 1fr) auto auto auto auto;
+      gap: 8px;
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 700;
+      margin-bottom: 6px;
+    }
     .camera-row {
       display: grid;
       grid-template-columns: minmax(120px, 1fr) minmax(160px, 1.3fr) minmax(120px, 1fr) auto auto auto auto;
@@ -192,11 +201,13 @@ INDEX_HTML = r"""
       font-weight: 600;
       overflow-wrap: anywhere;
     }
-    .live-item iframe {
+    .live-item iframe,
+    .live-item img {
       display: block;
       width: 100%;
       height: 260px;
       border: 0;
+      object-fit: contain;
       background: #05080c;
     }
     .events-table {
@@ -262,6 +273,13 @@ INDEX_HTML = r"""
       object-fit: contain;
       background: #05080c;
     }
+    .mobile-label {
+      display: none;
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 700;
+      margin-bottom: 4px;
+    }
     .status {
       min-height: 22px;
       color: var(--muted);
@@ -281,6 +299,48 @@ INDEX_HTML = r"""
       header { align-items: flex-start; flex-direction: column; }
       .grid, .camera-row, .entity-picker { grid-template-columns: 1fr; }
       .tabs { overflow-x: auto; }
+      button { width: 100%; }
+      .actions { align-items: stretch; flex-direction: column; }
+      .camera-row {
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        padding: 10px;
+      }
+      .camera-head { display: none; }
+      .mobile-label { display: block; }
+      .viewer {
+        width: calc(100vw - 12px);
+        max-height: calc(100vh - 12px);
+      }
+      .viewer-head {
+        align-items: stretch;
+        flex-direction: column;
+      }
+      .viewer-body img,
+      .viewer-body iframe {
+        height: min(56vh, 420px);
+      }
+      .live-grid { grid-template-columns: 1fr; }
+      .live-item iframe,
+      .live-item img { height: 220px; }
+      .events-table,
+      .events-table thead,
+      .events-table tbody,
+      .events-table tr,
+      .events-table th,
+      .events-table td {
+        display: block;
+        width: 100%;
+      }
+      .events-table thead { display: none; }
+      .events-table tr {
+        border-bottom: 1px solid var(--line);
+        padding: 8px 0;
+      }
+      .events-table td {
+        border-bottom: 0;
+        padding: 5px 0;
+      }
     }
   </style>
 </head>
@@ -385,6 +445,15 @@ cháy"></textarea>
         <button class="secondary" id="addStreamBtn" type="button">Add Stream</button>
       </div>
       <div id="streamStatus" class="status"></div>
+      <div class="camera-head">
+        <div>Name</div>
+        <div>HA entity</div>
+        <div>go2rtc src</div>
+        <div></div>
+        <div></div>
+        <div></div>
+        <div></div>
+      </div>
       <div id="cameraList"></div>
       <div class="actions">
         <button class="secondary" id="addCameraBtn" type="button">Add Camera</button>
@@ -439,6 +508,8 @@ cháy"></textarea>
     let cameras = [];
     let currentViewerUrl = "";
     let currentSnapshotCamera = "";
+    let liveRefreshTimer = null;
+    let viewerRefreshTimer = null;
 
     function apiPath(path) {
       const base = window.location.pathname.endsWith("/")
@@ -470,6 +541,11 @@ cháy"></textarea>
 
     function entitySnapshotUrl(entityId) {
       return apiPath(`api/camera/frame?entity_id=${encodeURIComponent(entityId)}&_=${Date.now()}`);
+    }
+
+    function cameraFrameUrl(camera) {
+      const item = normalizeCamera(camera);
+      return item.src ? snapshotUrl(item.src) : entitySnapshotUrl(item.entity_id);
     }
 
     async function requestJson(path, options = {}, timeoutMs = 45000) {
@@ -538,6 +614,10 @@ cháy"></textarea>
       return cameras.map(normalizeCamera).filter(camera => camera.src);
     }
 
+    function camerasWithPreview() {
+      return cameras.map(normalizeCamera).filter(camera => camera.src || camera.entity_id);
+    }
+
     function validateTimeoutInputs() {
       const labels = {
         ai_timeout: "AI Timeout",
@@ -561,20 +641,35 @@ cháy"></textarea>
         const row = document.createElement("div");
         row.className = "camera-row";
 
+        const nameWrap = document.createElement("div");
+        const nameLabel = document.createElement("div");
+        nameLabel.className = "mobile-label";
+        nameLabel.textContent = "Name";
         const nameInput = document.createElement("input");
         nameInput.value = item.name;
         nameInput.placeholder = "Display name";
         nameInput.addEventListener("input", () => cameras[index].name = nameInput.value);
+        nameWrap.append(nameLabel, nameInput);
 
+        const entityWrap = document.createElement("div");
+        const entityLabel = document.createElement("div");
+        entityLabel.className = "mobile-label";
+        entityLabel.textContent = "HA entity";
         const entityInput = document.createElement("input");
         entityInput.value = item.entity_id;
         entityInput.placeholder = "HA entity";
         entityInput.addEventListener("input", () => cameras[index].entity_id = entityInput.value);
+        entityWrap.append(entityLabel, entityInput);
 
+        const srcWrap = document.createElement("div");
+        const srcLabel = document.createElement("div");
+        srcLabel.className = "mobile-label";
+        srcLabel.textContent = "go2rtc src";
         const srcInput = document.createElement("input");
         srcInput.value = item.src;
         srcInput.placeholder = "go2rtc src, e.g. bep";
         srcInput.addEventListener("input", () => cameras[index].src = srcInput.value);
+        srcWrap.append(srcLabel, srcInput);
 
         const test = document.createElement("button");
         test.className = "secondary";
@@ -592,7 +687,7 @@ cháy"></textarea>
         video.className = "secondary";
         video.type = "button";
         video.textContent = "Video";
-        video.addEventListener("click", () => viewVideo(srcInput.value, cameraLabel(cameras[index])));
+        video.addEventListener("click", () => viewVideo(cameras[index], cameraLabel(cameras[index])));
 
         const remove = document.createElement("button");
         remove.className = "danger";
@@ -603,7 +698,7 @@ cháy"></textarea>
           renderCameras();
         });
 
-        row.append(nameInput, entityInput, srcInput, snapshot, video, test, remove);
+        row.append(nameWrap, entityWrap, srcWrap, snapshot, video, test, remove);
         list.append(row);
       });
       renderLiveCameras();
@@ -627,6 +722,7 @@ cháy"></textarea>
 
     function showViewer(title, content, openUrl) {
       currentViewerUrl = openUrl || "";
+      stopViewerRefresh();
       document.getElementById("viewerTitle").textContent = title;
       const body = document.getElementById("viewerBody");
       body.innerHTML = "";
@@ -634,6 +730,13 @@ cháy"></textarea>
       document.getElementById("openViewerBtn").style.display = currentViewerUrl ? "" : "none";
       document.getElementById("refreshViewerBtn").style.display = currentSnapshotCamera ? "" : "none";
       document.getElementById("viewerDialog").showModal();
+    }
+
+    function stopViewerRefresh() {
+      if (viewerRefreshTimer) {
+        clearInterval(viewerRefreshTimer);
+        viewerRefreshTimer = null;
+      }
     }
 
     function viewSnapshot(camera, label = "") {
@@ -645,20 +748,33 @@ cháy"></textarea>
       img.dataset.src = item.src;
       img.dataset.entityId = item.entity_id;
       img.alt = `Snapshot ${label || item.src || item.entity_id}`;
-      img.src = item.src ? snapshotUrl(item.src) : entitySnapshotUrl(item.entity_id);
+      img.src = cameraFrameUrl(item);
       showViewer(`Snapshot: ${label || item.src || item.entity_id}`, img, img.src);
     }
 
     function viewVideo(camera, label = "") {
-      const src = cameraSrcOrError(camera);
-      if (!src) return;
+      const item = snapshotSourceOrError(camera);
+      if (!item) return;
       currentSnapshotCamera = "";
-      const url = buildGo2rtcUrl(src, "/stream.html", {mode: "mse"});
-      const frame = document.createElement("iframe");
-      frame.src = url;
-      frame.title = `Video ${label || src}`;
-      frame.allow = "autoplay; fullscreen; picture-in-picture";
-      showViewer(`Video: ${label || src}`, frame, url);
+      if (item.src) {
+        const url = buildGo2rtcUrl(item.src, "/stream.html", {mode: "mse"});
+        const frame = document.createElement("iframe");
+        frame.src = url;
+        frame.title = `Video ${label || item.src}`;
+        frame.allow = "autoplay; fullscreen; picture-in-picture";
+        showViewer(`Video: ${label || item.src}`, frame, url);
+        return;
+      }
+
+      const img = document.createElement("img");
+      img.id = "snapshotImage";
+      img.dataset.src = "";
+      img.dataset.entityId = item.entity_id;
+      img.alt = `Live snapshot ${label || item.entity_id}`;
+      img.src = entitySnapshotUrl(item.entity_id);
+      currentSnapshotCamera = item.entity_id;
+      showViewer(`Live snapshot: ${label || item.entity_id}`, img, img.src);
+      viewerRefreshTimer = setInterval(refreshSnapshot, 3000);
     }
 
     function refreshSnapshot() {
@@ -769,10 +885,14 @@ cháy"></textarea>
     function renderLiveCameras() {
       const grid = document.getElementById("liveGrid");
       if (!grid) return;
+      if (liveRefreshTimer) {
+        clearInterval(liveRefreshTimer);
+        liveRefreshTimer = null;
+      }
       grid.innerHTML = "";
-      const items = camerasWithSrc();
+      const items = camerasWithPreview();
       if (!items.length) {
-        grid.textContent = "No go2rtc src configured.";
+        grid.textContent = "No camera source configured.";
         return;
       }
 
@@ -785,17 +905,31 @@ cháy"></textarea>
         const name = document.createElement("div");
         name.textContent = cameraLabel(camera);
         const src = document.createElement("span");
-        src.textContent = camera.src;
+        src.textContent = camera.src || camera.entity_id;
         title.append(name, src);
 
-        const frame = document.createElement("iframe");
-        frame.src = buildGo2rtcUrl(camera.src, "/stream.html", {mode: "mse"});
-        frame.title = `Live ${cameraLabel(camera)}`;
-        frame.allow = "autoplay; fullscreen; picture-in-picture";
+        let media;
+        if (camera.src) {
+          media = document.createElement("iframe");
+          media.src = buildGo2rtcUrl(camera.src, "/stream.html", {mode: "mse"});
+          media.allow = "autoplay; fullscreen; picture-in-picture";
+        } else {
+          media = document.createElement("img");
+          media.dataset.entityId = camera.entity_id;
+          media.src = entitySnapshotUrl(camera.entity_id);
+          media.alt = `Live snapshot ${cameraLabel(camera)}`;
+        }
+        media.title = `Live ${cameraLabel(camera)}`;
 
-        item.append(title, frame);
+        item.append(title, media);
         grid.append(item);
       });
+
+      liveRefreshTimer = setInterval(() => {
+        document.querySelectorAll("#liveGrid img[data-entity-id]").forEach(img => {
+          img.src = entitySnapshotUrl(img.dataset.entityId);
+        });
+      }, 5000);
     }
 
     function renderEvents(events) {
@@ -953,6 +1087,7 @@ cháy"></textarea>
       renderCameras();
     });
     document.getElementById("closeViewerBtn").addEventListener("click", () => {
+      stopViewerRefresh();
       document.getElementById("viewerDialog").close();
       document.getElementById("viewerBody").innerHTML = "";
       currentSnapshotCamera = "";
