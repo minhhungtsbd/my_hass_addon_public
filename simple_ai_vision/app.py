@@ -164,8 +164,8 @@ INDEX_HTML = r"""
     }
     .camera-head {
       display: grid;
-      grid-template-columns: minmax(90px, .7fr) minmax(120px, 1fr) minmax(160px, 1.3fr) minmax(140px, 1.2fr) minmax(120px, 1fr) auto auto auto auto;
-      gap: 8px;
+      grid-template-columns: 42px minmax(82px, .85fr) minmax(120px, 1.15fr) minmax(112px, 1fr) minmax(82px, .85fr) repeat(4, max-content);
+      gap: 6px;
       color: var(--muted);
       font-size: 12px;
       font-weight: 700;
@@ -173,13 +173,19 @@ INDEX_HTML = r"""
     }
     .camera-row {
       display: grid;
-      grid-template-columns: minmax(90px, .7fr) minmax(120px, 1fr) minmax(160px, 1.3fr) minmax(140px, 1.2fr) minmax(120px, 1fr) auto auto auto auto;
-      gap: 8px;
+      grid-template-columns: 42px minmax(82px, .85fr) minmax(120px, 1.15fr) minmax(112px, 1fr) minmax(82px, .85fr) repeat(4, max-content);
+      gap: 6px;
       margin-bottom: 8px;
+      align-items: center;
+    }
+    .camera-row button {
+      padding: 9px 10px;
+      white-space: nowrap;
     }
     .monitor-toggle {
       display: flex;
       align-items: center;
+      justify-content: center;
       gap: 8px;
       min-height: 40px;
       color: var(--text);
@@ -323,7 +329,9 @@ INDEX_HTML = r"""
         border: 1px solid var(--line);
         border-radius: 8px;
         padding: 10px;
+        gap: 10px;
       }
+      .camera-row button { padding: 10px 14px; }
       .camera-head { display: none; }
       .mobile-label { display: block; }
       .viewer {
@@ -745,9 +753,7 @@ cháy"></textarea>
         monitorInput.type = "checkbox";
         monitorInput.checked = item.enabled;
         monitorInput.addEventListener("change", () => cameras[index].enabled = monitorInput.checked);
-        const monitorText = document.createElement("span");
-        monitorText.textContent = "Monitor";
-        monitorWrap.append(monitorInput, monitorText);
+        monitorWrap.append(monitorInput);
 
         const nameWrap = document.createElement("div");
         const nameLabel = document.createElement("div");

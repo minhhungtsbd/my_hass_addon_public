@@ -1,20 +1,43 @@
 # Simple AI Vision
 
-Simple AI Vision là Home Assistant Add-on tối giản để phân tích snapshot JPEG từ go2rtc bằng AI Vision API và gửi thông báo Telegram khi kết quả phân tích khớp keyword.
+Simple AI Vision là Home Assistant Add-on nhẹ để phân tích ảnh snapshot camera bằng AI Vision API, match keyword và gửi cảnh báo Telegram.
+
+Luồng chính:
+
+```text
+Motion/sensor trigger trong Home Assistant
+-> POST /analyze
+-> lấy snapshot từ go2rtc hoặc Home Assistant Generic Camera
+-> OpenAI-compatible Vision API
+-> keyword matching
+-> Telegram sendPhoto
+-> ghi sự kiện và tùy chọn publish MQTT
+```
+
+Addon không tự polling camera mặc định. Home Assistant Automation là nơi quyết định khi nào cần gọi `/analyze`.
 
 ## Tính Năng
 
 - Nhận trigger qua `POST /analyze`.
-- Lấy snapshot từ go2rtc: `/api/frame.jpeg?src={camera}`.
+- Hỗ trợ hai nguồn snapshot:
+  - go2rtc: `/api/frame.jpeg?src={camera}`
+  - Home Assistant Generic Camera: `/api/camera_proxy/{entity_id}`
+- Ưu tiên go2rtc `src` nếu camera có cả `src` và `entity_id`.
 - Gửi ảnh dạng `data:image/jpeg;base64,...` tới OpenAI-compatible `chat/completions`.
-- Match keyword case-insensitive, hỗ trợ regex.
+- Hỗ trợ OpenAI, OpenRouter, 9Router, Gemini qua OpenAI-compatible gateway.
+- Match keyword hoặc regex, không phân biệt hoa thường.
 - Gửi Telegram bằng Bot API `sendPhoto`.
-- Web UI đơn giản để chỉnh cấu hình và test nhiều camera.
-- Có nút test AI API riêng trước khi test camera.
-- Có nút lưu riêng trong phần Cameras.
-- Cấu hình chỉ nhập trong Web UI và được lưu tại `/data/simple_ai_vision_config.json`.
-- Hỗ trợ cả response JSON chuẩn và SSE streaming chunk từ một số OpenAI-compatible gateway.
-- Không database, không MQTT, không video streaming, không frontend SPA.
+- Nút test AI API và test Telegram riêng.
+- Tab Cameras để quản lý camera, bật/tắt monitor từng camera.
+- Load camera entity từ Home Assistant.
+- Load stream trực tiếp từ go2rtc.
+- Load motion/sensor trigger từ Home Assistant và sinh YAML automation mẫu.
+- Tab Live để xem live bằng go2rtc stream hoặc snapshot entity tự refresh.
+- Tab Sự kiện để xem kết quả analyze: `sent`, `no_match`, `disabled`, `telegram_error`, lỗi network/config.
+- Tùy chọn MQTT publish event JSON.
+- Config lưu tại `/data/simple_ai_vision_config.json`.
+- Event log lưu tại `/data/simple_ai_vision_events.jsonl`.
+- Không database, không object detection local, không RTSP decode, không ffmpeg processing.
 
 ## Cài Đặt
 
@@ -29,110 +52,134 @@ https://github.com/minhhungtsbd/my_hass_addon_public
 
 5. Cài add-on **Simple AI Vision**.
 6. Bấm **Start**.
-7. Bấm **Open Web UI** để chỉnh cấu hình, thêm camera và test nhanh.
+7. Bấm **Open Web UI** để cấu hình.
 
-## Cấu Hình
+## Core Settings
 
-Toàn bộ cấu hình vận hành được nhập trong **Open Web UI** và lưu tại:
-
-```text
-/data/simple_ai_vision_config.json
-```
-
-```yaml
-go2rtc_url: "http://homeassistant.local:1984"
-ai_api_key: "sk-..."
-ai_base_url: "https://api.openai.com/v1"
-ai_model: "gpt-4o-mini"
-telegram_bot_token: "123456:ABC..."
-telegram_chat_id: "123456789"
-prompt: "Bạn đang phân tích ảnh camera an ninh.\nChỉ mô tả các sự kiện quan trọng liên quan đến an ninh.\nNếu không có gì quan trọng hãy trả lời NORMAL."
-keyword_match:
-  - person
-  - human
-  - stranger
-  - fire
-  - smoke
-  - người
-  - cháy
-cameras:
-  - garage
-  - front_gate
-ai_timeout: 30
-snapshot_timeout: 10
-telegram_timeout: 10
-```
-
-## Lấy IP Và Hostname Local Cho go2rtc
-
-go2rtc API thường chạy ở port `1984`. Log go2rtc sẽ có dòng:
-
-```text
-[api] listen addr=:1984
-```
-
-Cách lấy IP hoặc hostname trong Home Assistant:
-
-1. Vào **Settings** -> **System** -> **Network**.
-2. Xem **The name your instance will have on your network** để lấy hostname.
-3. Nếu hostname là `HomeAssistant-Hung`, thử dùng:
-
-```text
-http://homeassistant-hung.local:1984
-```
-
-4. Xem **Home Assistant URL** -> **Local network** để lấy IP nội bộ, ví dụ:
-
-```text
-http://192.168.1.101:8123
-```
-
-5. Đổi port `8123` thành `1984`:
-
-```text
-http://192.168.1.101:1984
-```
-
-Trong Web UI, trường `go2rtc_url` chỉ nhập base URL:
-
-```text
-http://192.168.1.101:1984
-```
-
-Không nhập nguyên URL snapshot:
-
-```text
-http://192.168.1.101:1984/api/frame.jpeg?src=bep
-```
-
-Camera chỉ nhập tên stream:
-
-```text
-bep
-```
-
-Addon sẽ tự ghép thành:
-
-```text
-http://192.168.1.101:1984/api/frame.jpeg?src=bep
-```
-
-## Options
+Các trường chính:
 
 | Option | Mô tả |
 | --- | --- |
-| `go2rtc_url` | URL go2rtc, ví dụ `http://homeassistant.local:1984` |
-| `ai_api_key` | API key của provider OpenAI-compatible |
-| `ai_base_url` | Base URL API, ví dụ `https://api.openai.com/v1` |
+| `go2rtc_url` | Base URL go2rtc, ví dụ `http://homeassistant.local:1984` |
+| `ai_api_key` | API key provider OpenAI-compatible |
+| `ai_base_url` | Base URL API, ví dụ `https://api.openai.com/v1` hoặc `https://9router.example/v1` |
 | `ai_model` | Model vision cần dùng |
 | `telegram_bot_token` | Telegram bot token |
-| `telegram_chat_id` | Telegram chat ID nhận cảnh báo |
+| `telegram_chat_id` | Chat ID nhận cảnh báo |
 | `prompt` | Prompt gửi cho AI |
-| `keyword_match` | Danh sách keyword hoặc regex để quyết định gửi Telegram |
-| `cameras` | Danh sách camera go2rtc để thao tác nhanh trong Web UI |
-| `ai_timeout` | Timeout khi gọi AI API, đơn vị giây |
-| `snapshot_timeout` | Timeout khi lấy snapshot, đơn vị giây |
-| `telegram_timeout` | Timeout khi gửi Telegram, đơn vị giây |
+| `keyword_match` | Mỗi dòng là keyword hoặc regex |
+| `ai_timeout` | Thời gian chờ AI API, giây |
+| `snapshot_timeout` | Thời gian chờ snapshot, giây |
+| `telegram_timeout` | Thời gian chờ Telegram API, giây |
+
+Timeout không phải lịch chạy tự động. Timeout chỉ là thời gian chờ tối đa cho từng request.
+
+Prompt gợi ý:
+
+```text
+Bạn là hệ thống phân tích ảnh camera trong nhà.
+
+Nếu thấy người trong ảnh, chỉ trả lời:
+ALERT_PERSON: mô tả ngắn trong tối đa 20 từ.
+
+Nếu không thấy người, chỉ trả lời:
+NORMAL
+
+Không giải thích.
+Không hướng dẫn.
+Không viết code.
+Không nhắc đến Telegram.
+```
+
+Keyword gợi ý:
+
+```text
+ALERT_PERSON
+fire
+smoke
+cháy
+```
+
+## Cameras
+
+Mỗi camera có các trường:
+
+| Field | Mô tả |
+| --- | --- |
+| `Monitor` | Bật/tắt theo dõi. Nếu tắt, `/analyze` sẽ trả `skipped: true` và không gọi AI |
+| `Name` | Tên hiển thị |
+| `HA entity` | Entity Home Assistant, ví dụ `camera.camera_bep_go2rtc` |
+| `Trigger` | Motion/sensor entity dùng để sinh YAML automation |
+| `go2rtc src` | Tên stream go2rtc, ví dụ `bep` |
+
+Nút trong tab Cameras:
+
+- `Load Entities`: load `camera` và `image` entity từ Home Assistant.
+- `Add Selected`: thêm entity đã chọn.
+- `Load go2rtc`: load stream từ `go2rtc_url/api/streams`.
+- `Add Stream`: thêm stream go2rtc đã chọn.
+- `Load Motion/Sensors`: load `binary_sensor` và `sensor` để chọn trigger.
+- `Snapshot`: xem ảnh snapshot.
+- `Video`: xem go2rtc stream nếu có `src`; nếu chỉ có entity thì xem snapshot tự refresh.
+- `Test`: gọi `/analyze` thủ công.
+- `Save Cameras`: lưu camera và trigger.
+
+Camera chỉ có `HA entity` vẫn dùng được. Camera chỉ có `go2rtc src` cũng dùng được. Nếu có cả hai thì phân tích ưu tiên go2rtc.
+
+## Home Assistant Automation
+
+Addon không tự chạy nền. Muốn tự động thì Home Assistant Automation cần gọi `/analyze`.
+
+Trong tab Cameras, sau khi chọn `Trigger`, addon sẽ sinh YAML mẫu ở phần **Automation YAML**.
+
+Ví dụ `rest_command`:
+
+```yaml
+rest_command:
+  simple_ai_vision_analyze:
+    url: "http://127.0.0.1:8000/analyze"
+    method: post
+    content_type: "application/json"
+    payload: "{{ payload }}"
+```
+
+Ví dụ automation với go2rtc source:
+
+```yaml
+automation:
+  - alias: "Simple AI Vision - Bếp"
+    trigger:
+      - platform: state
+        entity_id: binary_sensor.motion_bep
+        to: "on"
+    action:
+      - service: rest_command.simple_ai_vision_analyze
+        data:
+          payload: '{"camera":"bep"}'
+    mode: single
+```
+
+Ví dụ automation với Home Assistant camera entity:
+
+```yaml
+automation:
+  - alias: "Simple AI Vision - Bếp Entity"
+    trigger:
+      - platform: state
+        entity_id: binary_sensor.motion_bep
+        to: "on"
+    action:
+      - service: rest_command.simple_ai_vision_analyze
+        data:
+          payload: '{"entity_id":"camera.camera_bep_go2rtc"}'
+    mode: single
+```
+
+Nếu `127.0.0.1:8000` không gọi được từ Home Assistant, dùng IP/hostname của máy chạy add-on:
+
+```text
+http://<home-assistant-ip>:8000/analyze
+```
 
 ## API
 
@@ -142,78 +189,147 @@ Web UI:
 GET /
 ```
 
-Config API dùng bởi Web UI:
+Config và test:
 
 ```http
 GET /api/config
 POST /api/config
 POST /api/test-ai
+POST /api/test-telegram
 ```
 
-Endpoint:
+Camera helpers:
+
+```http
+GET /api/camera/frame?camera=bep
+GET /api/camera/frame?entity_id=camera.camera_bep_go2rtc
+GET /api/hass/cameras
+GET /api/hass/triggers
+GET /api/go2rtc/streams
+GET /api/events
+```
+
+Analyze bằng go2rtc:
 
 ```http
 POST /analyze
 Content-Type: application/json
-```
 
-Request:
-
-```json
 {
-  "camera": "garage"
+  "camera": "bep"
 }
 ```
 
-Response khi khớp keyword:
+Analyze bằng Home Assistant entity:
+
+```http
+POST /analyze
+Content-Type: application/json
+
+{
+  "entity_id": "camera.camera_bep_go2rtc"
+}
+```
+
+Response match:
 
 ```json
 {
   "success": true,
   "matched": true,
-  "analysis": "Có một người đang đứng trước cổng."
+  "matched_keyword": "ALERT_PERSON",
+  "analysis": "ALERT_PERSON: Có người đang ngồi trước bàn."
 }
 ```
 
-Response khi không khớp:
+Response không match:
 
 ```json
 {
   "success": true,
   "matched": false,
+  "matched_keyword": "",
   "analysis": "NORMAL"
 }
 ```
 
-## Home Assistant Automation
+Response camera tắt Monitor:
 
-Thêm `rest_command`:
-
-```yaml
-rest_command:
-  simple_ai_vision_analyze:
-    url: "http://127.0.0.1:8000/analyze"
-    method: post
-    content_type: "application/json"
-    payload: '{"camera":"garage"}'
+```json
+{
+  "success": true,
+  "skipped": true,
+  "reason": "camera disabled",
+  "camera": "bep"
+}
 ```
 
-Gọi từ automation:
+## Tab Live
 
-```yaml
-action:
-  - service: rest_command.simple_ai_vision_analyze
+Tab Live hỗ trợ:
+
+- `Both sources`: ưu tiên go2rtc nếu camera có `src`, nếu không thì dùng entity snapshot.
+- `Entities only`: chỉ xem nguồn Home Assistant entity.
+- `go2rtc only`: chỉ xem stream go2rtc.
+- `Camera Limit`: giới hạn số camera hiển thị.
+
+go2rtc dùng `stream.html?src={src}&mode=mse`. Entity dùng snapshot proxy và tự refresh.
+
+## Tab Sự Kiện
+
+Tab Sự kiện đọc file:
+
+```text
+/data/simple_ai_vision_events.jsonl
 ```
 
-Nếu Home Assistant không gọi được `127.0.0.1`, dùng IP hoặc hostname của máy chạy add-on:
+Các trạng thái thường gặp:
 
-```yaml
-url: "http://<home-assistant-ip>:8000/analyze"
+| Status | Ý nghĩa |
+| --- | --- |
+| `sent` | Đã match keyword và gửi Telegram thành công |
+| `no_match` | AI trả lời nhưng không khớp keyword |
+| `disabled` | Camera bị tắt Monitor |
+| `telegram_error` | Match keyword nhưng Telegram lỗi |
+| `config_error` | Thiếu hoặc sai cấu hình |
+| `timeout` | Timeout mạng |
+| `upstream_error` | API upstream trả HTTP error |
+| `network_error` | Lỗi network |
+| `internal_error` | Lỗi không mong muốn |
+
+## MQTT
+
+MQTT là tùy chọn. Core analyze không phụ thuộc MQTT.
+
+Khi bật `MQTT Publish`, addon publish mỗi event dạng JSON tới topic đã cấu hình.
+
+Các trường MQTT:
+
+| Option | Mô tả |
+| --- | --- |
+| `mqtt_enabled` | Bật/tắt publish MQTT |
+| `mqtt_host` | MQTT broker host |
+| `mqtt_port` | MQTT broker port, mặc định `1883` |
+| `mqtt_topic` | Topic, mặc định `simple_ai_vision/events` |
+| `mqtt_username` | Username nếu broker yêu cầu |
+| `mqtt_password` | Password nếu broker yêu cầu |
+
+Payload ví dụ:
+
+```json
+{
+  "time": "2026-05-14T11:06:57+00:00",
+  "status": "sent",
+  "camera": "bep",
+  "keyword": "ALERT_PERSON",
+  "analysis": "ALERT_PERSON: Có người đang ngồi trước bàn.",
+  "error": ""
+}
 ```
 
 ## Provider AI
 
-Add-on dùng chuẩn OpenAI-compatible `chat/completions`.
+Addon dùng OpenAI-compatible `chat/completions`.
 
 Ảnh được gửi trong message content:
 
@@ -221,56 +337,23 @@ Add-on dùng chuẩn OpenAI-compatible `chat/completions`.
 data:image/jpeg;base64,...
 ```
 
-Các provider thường dùng:
-
-- OpenAI
-- OpenRouter
-- 9Router
-- Gemini qua OpenAI-compatible gateway
-
-### 9Router
-
-Theo README của 9Router, endpoint OpenAI-compatible là:
+Với 9Router, trường `AI Base URL` chỉ nhập base URL có `/v1`, không nhập `/chat/completions`:
 
 ```text
-POST http://localhost:20128/v1/chat/completions
+https://9router.example/v1
 ```
 
-Vì vậy trong Web UI, trường `AI Base URL` chỉ nhập base URL có `/v1`, không nhập `/chat/completions`:
+Addon tự ghép:
 
 ```text
-http://<9router-host>:20128/v1
+/chat/completions
 ```
-
-Ví dụ nếu bạn expose 9Router qua domain:
-
-```text
-https://9router.minhhungtsbd.me/v1
-```
-
-`AI Model` dùng đúng model/combo trong dashboard 9Router, ví dụ:
-
-```text
-cc/claude-opus-4-7
-```
-
-hoặc model/combo bạn đã tạo trong 9Router.
-
-Addon gửi request với:
-
-```json
-{
-  "stream": false
-}
-```
-
-Một số gateway 9Router vẫn có thể trả Server-Sent Events dạng `data: {...}`. Addon hỗ trợ parse cả JSON chuẩn và SSE streaming chunk.
 
 ## Telegram
 
-Add-on gửi ảnh bằng Telegram Bot API `sendPhoto`.
+Addon gửi ảnh bằng Telegram Bot API `sendPhoto`.
 
-Caption gồm:
+Caption:
 
 ```text
 Camera: <camera>
@@ -278,10 +361,20 @@ Camera: <camera>
 <AI analysis result>
 ```
 
+Nút `Test Telegram` gửi tin nhắn text để kiểm tra token/chat ID trước khi test camera.
+
 ## Kiểm Tra Nhanh
 
 ```bash
 curl -X POST http://<home-assistant-ip>:8000/analyze \
   -H "Content-Type: application/json" \
-  -d '{"camera":"garage"}'
+  -d '{"camera":"bep"}'
+```
+
+Hoặc:
+
+```bash
+curl -X POST http://<home-assistant-ip>:8000/analyze \
+  -H "Content-Type: application/json" \
+  -d '{"entity_id":"camera.camera_bep_go2rtc"}'
 ```

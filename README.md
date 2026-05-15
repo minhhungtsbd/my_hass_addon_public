@@ -4,26 +4,40 @@ Repository này chứa các Home Assistant Add-on public.
 
 ## Add-ons
 
-### Simple AI Vision
+| Add-on | Mô tả |
+| --- | --- |
+| [Simple AI Vision](./simple_ai_vision) | Add-on nhẹ để phân tích snapshot camera bằng AI Vision API, match keyword và gửi cảnh báo Telegram. |
 
-Add-on tối giản dùng để phân tích snapshot camera bằng AI Vision API và gửi cảnh báo Telegram khi nội dung phân tích khớp keyword.
+## Simple AI Vision
 
-Luồng xử lý:
+Luồng xử lý chính:
 
 ```text
-Home Assistant Automation
+Home Assistant motion/sensor trigger
 -> POST /analyze
--> go2rtc snapshot
+-> go2rtc hoặc Home Assistant Generic Camera snapshot
 -> OpenAI-compatible Vision API
 -> keyword matching
 -> Telegram sendPhoto
+-> event log và tùy chọn MQTT publish
 ```
 
-Add-on hiện có:
+Add-on này không tự polling camera mặc định. Home Assistant Automation là nơi quyết định khi nào cần gọi `/analyze`.
 
-| Add-on | Mô tả |
-| --- | --- |
-| [Simple AI Vision](./simple_ai_vision) | Phân tích ảnh JPEG từ go2rtc bằng AI Vision API, có Web UI cấu hình cơ bản, test AI API và gửi Telegram khi khớp keyword |
+Tính năng chính:
+
+- Quản lý camera trong Web UI.
+- Bật/tắt Monitor cho từng camera.
+- Hỗ trợ snapshot từ go2rtc `src` hoặc Home Assistant camera entity.
+- Ưu tiên go2rtc nếu camera có cả `src` và `entity_id`.
+- Load camera entities, go2rtc streams, motion/sensor triggers từ Home Assistant.
+- Sinh YAML automation mẫu theo trigger đã chọn.
+- Tab Live để xem camera từ entity, go2rtc hoặc cả hai.
+- Tab Sự kiện để xem log các lần analyze.
+- Tùy chọn MQTT publish event JSON.
+- Test AI API, Test Telegram và Test từng camera.
+
+Tài liệu đầy đủ: [simple_ai_vision/README.md](./simple_ai_vision/README.md)
 
 ## Cài Đặt Repository
 
@@ -40,96 +54,20 @@ https://github.com/minhhungtsbd/my_hass_addon_public
 6. Bấm **Add**.
 7. Tìm add-on **Simple AI Vision** trong Add-on Store.
 8. Cài đặt rồi bấm **Start**.
-9. Mở tab **Open Web UI** để chỉnh cấu hình và thêm camera.
-
-Add-on này dùng Web UI làm nơi cấu hình chính. Tab Configuration của Home Assistant không cần điền gì.
+9. Mở **Open Web UI** để cấu hình.
 
 ## Yêu Cầu
 
 - Home Assistant OS hoặc Supervised có Add-on Store.
-- go2rtc đang chạy và có thể lấy snapshot qua `/api/frame.jpeg?src={camera}`.
+- go2rtc nếu muốn dùng snapshot/video trực tiếp từ stream.
+- Camera entity trong Home Assistant nếu muốn dùng Generic Camera snapshot.
 - API key từ provider OpenAI-compatible có hỗ trợ vision.
 - Telegram bot token và chat ID.
+- MQTT broker nếu bật tùy chọn MQTT publish.
 
-Với 9Router, nhập `AI Base URL` dạng:
+## Gọi Từ Home Assistant Automation
 
-```text
-http://<9router-host>:20128/v1
-```
-
-hoặc:
-
-```text
-https://9router.minhhungtsbd.me/v1
-```
-
-Không nhập thêm `/chat/completions`; addon tự ghép endpoint này.
-
-## Lấy IP Và Hostname Local
-
-Để cấu hình `go2rtc_url`, cần lấy địa chỉ nội bộ của Home Assistant.
-
-Cách xem trong Home Assistant:
-
-1. Vào **Settings** -> **System** -> **Network**.
-2. Xem phần **The name your instance will have on your network** để lấy hostname.
-3. Nếu hostname là `HomeAssistant-Hung`, URL local thường là:
-
-```text
-http://homeassistant-hung.local:1984
-```
-
-4. Xem phần **Home Assistant URL** -> **Local network** để lấy IP nội bộ, ví dụ:
-
-```text
-http://192.168.1.101:8123
-```
-
-5. Đổi port Home Assistant `8123` sang port go2rtc `1984`:
-
-```text
-http://192.168.1.101:1984
-```
-
-URL snapshot sẽ có dạng:
-
-```text
-http://192.168.1.101:1984/api/frame.jpeg?src=bep
-```
-
-Trong Web UI chỉ điền `go2rtc_url` là base URL:
-
-```text
-http://192.168.1.101:1984
-```
-
-Camera chỉ điền tên stream:
-
-```text
-bep
-```
-
-## Gọi Từ Automation
-
-Sau khi add-on chạy, gọi API:
-
-```http
-POST http://<home-assistant-ip>:8000/analyze
-Content-Type: application/json
-
-{
-  "camera": "garage"
-}
-```
-
-Ví dụ Home Assistant automation action:
-
-```yaml
-action:
-  - service: rest_command.simple_ai_vision_analyze
-```
-
-Ví dụ `rest_command`:
+Thêm `rest_command`:
 
 ```yaml
 rest_command:
@@ -137,5 +75,43 @@ rest_command:
     url: "http://127.0.0.1:8000/analyze"
     method: post
     content_type: "application/json"
-    payload: '{"camera":"garage"}'
+    payload: "{{ payload }}"
+```
+
+Ví dụ gọi bằng go2rtc source:
+
+```yaml
+automation:
+  - alias: "Simple AI Vision - Bếp"
+    trigger:
+      - platform: state
+        entity_id: binary_sensor.motion_bep
+        to: "on"
+    action:
+      - service: rest_command.simple_ai_vision_analyze
+        data:
+          payload: '{"camera":"bep"}'
+    mode: single
+```
+
+Ví dụ gọi bằng Home Assistant camera entity:
+
+```yaml
+automation:
+  - alias: "Simple AI Vision - Bếp Entity"
+    trigger:
+      - platform: state
+        entity_id: binary_sensor.motion_bep
+        to: "on"
+    action:
+      - service: rest_command.simple_ai_vision_analyze
+        data:
+          payload: '{"entity_id":"camera.camera_bep_go2rtc"}'
+    mode: single
+```
+
+Nếu `127.0.0.1:8000` không gọi được từ Home Assistant, dùng IP hoặc hostname của máy chạy add-on:
+
+```text
+http://<home-assistant-ip>:8000/analyze
 ```
