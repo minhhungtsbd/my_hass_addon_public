@@ -7,6 +7,7 @@ Repository này chứa các Home Assistant Add-on public.
 | Add-on | Mô tả |
 | --- | --- |
 | [Simple AI Vision](./simple_ai_vision) | Add-on nhẹ để phân tích snapshot camera bằng AI Vision API, match keyword và gửi cảnh báo Telegram. |
+| [Fall Detection Web](./fall_detection_web) | Web UI riêng để chạy YOLO person detection, AI fall verification và Telegram alert trên VPS/DC. |
 
 ## Simple AI Vision
 

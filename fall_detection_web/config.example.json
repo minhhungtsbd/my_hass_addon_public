@@ -1,0 +1,14 @@
+{
+  "rtsp_url": "rtsp://10.10.0.2:8554/bep_sub",
+  "telegram_bot_token": "",
+  "telegram_chat_id": "",
+  "ai_base_url": "https://9router.minhhungtsbd.me/v1",
+  "ai_api_key": "",
+  "vision_model": "gh/oswe-vscode-prime",
+  "yolo_model": "yolov8s.pt",
+  "confidence": 0.5,
+  "verify_interval": 20,
+  "alert_cooldown": 300,
+  "frame_skip": 2,
+  "loop_sleep": 0.3
+}
