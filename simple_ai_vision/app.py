@@ -164,7 +164,7 @@ INDEX_HTML = r"""
     }
     .camera-head,
     .camera-row {
-      --camera-grid: 42px minmax(96px, .85fr) minmax(136px, 1.15fr) minmax(126px, 1fr) minmax(96px, .85fr) repeat(4, max-content);
+      --camera-grid: 42px minmax(110px, .9fr) minmax(150px, 1.2fr) minmax(150px, 1.15fr) minmax(110px, .9fr) max-content;
       display: grid;
       grid-template-columns: var(--camera-grid);
       gap: 6px;
@@ -187,6 +187,50 @@ INDEX_HTML = r"""
     .camera-row button {
       padding: 9px 10px;
       white-space: nowrap;
+    }
+    .action-menu {
+      position: relative;
+      justify-self: end;
+    }
+    .action-menu summary {
+      cursor: pointer;
+      list-style: none;
+      border: 1px solid var(--accent);
+      color: var(--accent);
+      background: transparent;
+      border-radius: 6px;
+      padding: 10px 14px;
+      font-weight: 700;
+      line-height: 1;
+      user-select: none;
+    }
+    .action-menu summary::-webkit-details-marker {
+      display: none;
+    }
+    .action-menu summary::after {
+      content: " ▾";
+      font-size: 11px;
+    }
+    .action-menu[open] summary::after {
+      content: " ▴";
+    }
+    .action-menu-items {
+      position: absolute;
+      right: 0;
+      top: calc(100% + 6px);
+      z-index: 10;
+      min-width: 150px;
+      padding: 6px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: var(--panel);
+      box-shadow: 0 12px 24px rgba(0, 0, 0, .3);
+      display: grid;
+      gap: 6px;
+    }
+    .action-menu-items button {
+      width: 100%;
+      text-align: left;
     }
     .monitor-toggle {
       display: flex;
@@ -342,6 +386,14 @@ INDEX_HTML = r"""
         --camera-grid: 1fr;
       }
       .camera-row button { padding: 10px 14px; }
+      .action-menu,
+      .action-menu summary {
+        width: 100%;
+      }
+      .action-menu-items {
+        position: static;
+        margin-top: 8px;
+      }
       .camera-head { display: none; }
       .mobile-label { display: block; }
       .viewer {
@@ -520,10 +572,7 @@ cháy"></textarea>
         <div>HA entity</div>
         <div>Trigger</div>
         <div>go2rtc src</div>
-        <div></div>
-        <div></div>
-        <div></div>
-        <div></div>
+        <div>Actions</div>
       </div>
       <div id="cameraList"></div>
       <div class="actions">
@@ -833,7 +882,16 @@ cháy"></textarea>
           renderCameras();
         });
 
-        row.append(monitorWrap, nameWrap, entityWrap, triggerWrap, srcWrap, snapshot, video, test, remove);
+        const actions = document.createElement("details");
+        actions.className = "action-menu";
+        const actionsSummary = document.createElement("summary");
+        actionsSummary.textContent = "Actions";
+        const actionsList = document.createElement("div");
+        actionsList.className = "action-menu-items";
+        actionsList.append(snapshot, video, test, remove);
+        actions.append(actionsSummary, actionsList);
+
+        row.append(monitorWrap, nameWrap, entityWrap, triggerWrap, srcWrap, actions);
         list.append(row);
       });
       renderLiveCameras();
