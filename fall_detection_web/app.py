@@ -747,12 +747,19 @@ INDEX_HTML = r"""
         test.type = "button";
         test.textContent = "Test AI";
         test.addEventListener("click", async () => {
+          const label = camera.name || `Camera ${index + 1}`;
+          setStatus("cameraStatus", `Testing ${label}: capture snapshot and verify AI...`, "warn");
+          test.disabled = true;
+          test.textContent = "Testing...";
           try {
             const data = await api(`/api/test-ai-camera?index=${index}`, {method: "POST", timeout: 150000});
             document.getElementById("toolResult").textContent = JSON.stringify(data, null, 2);
-            setStatus("cameraStatus", "AI test complete", "ok");
+            setStatus("cameraStatus", `Test ${data.camera || label}: ${data.result || "complete"}`, "ok");
           } catch (err) {
-            setStatus("cameraStatus", err.message, "err");
+            setStatus("cameraStatus", `Test ${label} failed: ${err.message}`, "err");
+          } finally {
+            test.disabled = false;
+            test.textContent = "Test AI";
           }
         });
         const remove = document.createElement("button");
