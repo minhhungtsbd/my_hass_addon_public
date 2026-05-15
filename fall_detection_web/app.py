@@ -10,7 +10,7 @@ from typing import Any
 
 import requests
 from fastapi import FastAPI, File, HTTPException, Request, UploadFile
-from fastapi.responses import HTMLResponse, JSONResponse, Response
+from fastapi.responses import HTMLResponse, JSONResponse, Response, StreamingResponse
 
 
 ROOT = Path(__file__).resolve().parent
@@ -23,6 +23,7 @@ VERIFY_PATH = DATA_DIR / "verify.jpg"
 
 DEFAULT_CONFIG: dict[str, Any] = {
     "rtsp_url": "",
+    "cameras": [],
     "telegram_bot_token": "",
     "telegram_chat_id": "",
     "ai_base_url": "https://9router.minhhungtsbd.me/v1",
@@ -90,6 +91,7 @@ worker_thread: threading.Thread | None = None
 status: dict[str, Any] = {
     "running": False,
     "started_at": "",
+    "last_camera": "",
     "last_error": "",
     "last_person_confidence": 0,
     "last_ai_result": "",
@@ -247,6 +249,54 @@ INDEX_HTML = r"""
       background: var(--panel-2);
     }
     .card b { display: block; font-size: 18px; margin-top: 4px; }
+    .camera-head,
+    .camera-row {
+      display: grid;
+      grid-template-columns: 60px minmax(120px, .8fr) minmax(260px, 1.4fr) max-content;
+      gap: 8px;
+      align-items: center;
+    }
+    .camera-head {
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 700;
+      margin: 14px 0 6px;
+    }
+    .camera-row {
+      margin-bottom: 8px;
+    }
+    .camera-row > * { min-width: 0; }
+    .camera-row input[type="checkbox"] {
+      width: auto;
+    }
+    .camera-actions {
+      display: flex;
+      gap: 6px;
+      justify-content: flex-end;
+    }
+    .live-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+      gap: 12px;
+    }
+    .live-card {
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      overflow: hidden;
+      background: var(--panel-2);
+    }
+    .live-card h3 {
+      font-size: 14px;
+      padding: 10px;
+      border-bottom: 1px solid var(--line);
+    }
+    .live-card img {
+      width: 100%;
+      aspect-ratio: 16 / 9;
+      object-fit: contain;
+      background: #03070b;
+      display: block;
+    }
     img.preview {
       width: 100%;
       max-height: 560px;
@@ -283,6 +333,16 @@ INDEX_HTML = r"""
       main { padding: 14px; }
       header { flex-direction: column; }
       .grid, .cards { grid-template-columns: 1fr; }
+      .camera-head { display: none; }
+      .camera-row {
+        grid-template-columns: 1fr;
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        padding: 10px;
+      }
+      .camera-actions {
+        flex-direction: column;
+      }
       button { width: 100%; }
       .actions { align-items: stretch; flex-direction: column; }
       th:nth-child(5), td:nth-child(5) { display: none; }
@@ -301,6 +361,8 @@ INDEX_HTML = r"""
 
     <nav class="tabs">
       <button class="tab-btn active" data-tab="dashboardPanel" type="button">Dashboard</button>
+      <button class="tab-btn" data-tab="camerasPanel" type="button">Cameras</button>
+      <button class="tab-btn" data-tab="livePanel" type="button">Live</button>
       <button class="tab-btn" data-tab="settingsPanel" type="button">Settings</button>
       <button class="tab-btn" data-tab="eventsPanel" type="button">Events</button>
       <button class="tab-btn" data-tab="toolsPanel" type="button">Tools</button>
@@ -329,6 +391,35 @@ INDEX_HTML = r"""
       </div>
     </section>
 
+    <section id="camerasPanel" class="tab-panel hidden">
+      <div class="panel">
+        <h2>Cameras</h2>
+        <div class="camera-head">
+          <div>Enabled</div>
+          <div>Name</div>
+          <div>RTSP URL</div>
+          <div>Actions</div>
+        </div>
+        <div id="cameraList"></div>
+        <div class="actions" style="margin-top:14px">
+          <button id="addCameraBtn" type="button">Add Camera</button>
+          <button id="saveCamerasBtn" class="primary" type="button">Save Cameras</button>
+          <span id="cameraStatus"></span>
+        </div>
+      </div>
+    </section>
+
+    <section id="livePanel" class="tab-panel hidden">
+      <div class="panel">
+        <h2>Live Cameras</h2>
+        <div class="actions">
+          <button id="refreshLiveBtn" type="button">Refresh Live</button>
+          <span id="liveStatus"></span>
+        </div>
+        <div id="liveGrid" class="live-grid" style="margin-top:14px"></div>
+      </div>
+    </section>
+
     <section id="settingsPanel" class="tab-panel hidden">
       <div class="panel">
         <h2>Settings</h2>
@@ -342,7 +433,7 @@ INDEX_HTML = r"""
             <input id="ai_base_url" autocomplete="off" placeholder="https://9router.minhhungtsbd.me/v1">
           </div>
           <div>
-            <label for="vision_model">Vision Model</label>
+            <label for="vision_model">AI Model</label>
             <input id="vision_model" autocomplete="off" placeholder="gh/oswe-vscode-prime">
           </div>
           <div>
@@ -399,7 +490,7 @@ INDEX_HTML = r"""
         </div>
         <table>
           <thead>
-            <tr><th>Time</th><th>Status</th><th>Confidence</th><th>AI</th><th>Message</th></tr>
+            <tr><th>Time</th><th>Status</th><th>Camera</th><th>Confidence</th><th>AI</th><th>Message</th></tr>
           </thead>
           <tbody id="eventsBody"></tbody>
         </table>
@@ -427,6 +518,7 @@ INDEX_HTML = r"""
   </main>
 
   <script>
+    let cameras = [];
     const numericIds = ["confidence", "verify_interval", "alert_cooldown", "frame_skip", "loop_sleep"];
     const configIds = [
       "rtsp_url", "ai_base_url", "ai_api_key", "vision_model", "yolo_model",
@@ -466,12 +558,16 @@ INDEX_HTML = r"""
         const raw = document.getElementById(id).value.trim();
         data[id] = numericIds.includes(id) ? Number(raw) : raw;
       }
+      data.cameras = cameras;
       return data;
     }
     function renderConfig(config) {
       for (const id of configIds) {
         if (config[id] !== undefined) document.getElementById(id).value = config[id];
       }
+      cameras = Array.isArray(config.cameras) ? config.cameras : [];
+      renderCameras();
+      renderLive();
     }
     function renderStatus(data) {
       const s = data.status || {};
@@ -480,7 +576,7 @@ INDEX_HTML = r"""
       setText("runText", s.running ? "Running" : "Stopped");
       setText("frames", s.frames || 0);
       setText("personConf", s.last_person_confidence ? Number(s.last_person_confidence).toFixed(2) : "0");
-      setText("aiResult", s.last_ai_result || "-");
+      setText("aiResult", s.last_ai_result ? `${s.last_ai_result} ${s.last_camera ? "(" + s.last_camera + ")" : ""}` : "-");
       setText("lastVerify", s.last_verify_at || "-");
       if (s.last_error) setStatus("actionStatus", s.last_error, "err");
       const img = document.getElementById("snapshotImg");
@@ -494,6 +590,7 @@ INDEX_HTML = r"""
         for (const value of [
           event.time || "",
           event.status || "",
+          event.camera || "",
           event.confidence ? Number(event.confidence).toFixed(2) : "",
           event.ai_result || "",
           event.message || event.error || ""
@@ -517,6 +614,93 @@ INDEX_HTML = r"""
     async function loadEvents() {
       const data = await api("/api/events", {timeout: 10000});
       renderEvents(data.events || []);
+    }
+    function normalizeCamera(camera = {}) {
+      return {
+        enabled: camera.enabled !== false,
+        name: camera.name || "",
+        rtsp_url: camera.rtsp_url || ""
+      };
+    }
+    function renderCameras() {
+      const list = document.getElementById("cameraList");
+      list.innerHTML = "";
+      cameras = cameras.map(normalizeCamera);
+      cameras.forEach((camera, index) => {
+        const row = document.createElement("div");
+        row.className = "camera-row";
+
+        const enabled = document.createElement("input");
+        enabled.type = "checkbox";
+        enabled.checked = camera.enabled;
+        enabled.addEventListener("change", () => cameras[index].enabled = enabled.checked);
+
+        const name = document.createElement("input");
+        name.placeholder = "bep";
+        name.value = camera.name;
+        name.addEventListener("input", () => cameras[index].name = name.value);
+
+        const rtsp = document.createElement("input");
+        rtsp.placeholder = "rtsp://10.10.0.2:8554/bep_sub";
+        rtsp.value = camera.rtsp_url;
+        rtsp.addEventListener("input", () => cameras[index].rtsp_url = rtsp.value);
+
+        const actions = document.createElement("div");
+        actions.className = "camera-actions";
+        const snapshot = document.createElement("button");
+        snapshot.type = "button";
+        snapshot.textContent = "Snapshot";
+        snapshot.addEventListener("click", () => window.open(`/api/camera/snapshot?index=${index}&ts=${Date.now()}`, "_blank"));
+        const video = document.createElement("button");
+        video.type = "button";
+        video.textContent = "Video";
+        video.addEventListener("click", () => window.open(`/api/camera/video?index=${index}`, "_blank"));
+        const test = document.createElement("button");
+        test.type = "button";
+        test.textContent = "Test AI";
+        test.addEventListener("click", async () => {
+          try {
+            const data = await api(`/api/test-ai-camera?index=${index}`, {method: "POST", timeout: 150000});
+            document.getElementById("toolResult").textContent = JSON.stringify(data, null, 2);
+            setStatus("cameraStatus", "AI test complete", "ok");
+          } catch (err) {
+            setStatus("cameraStatus", err.message, "err");
+          }
+        });
+        const remove = document.createElement("button");
+        remove.type = "button";
+        remove.className = "danger";
+        remove.textContent = "Remove";
+        remove.addEventListener("click", () => {
+          cameras.splice(index, 1);
+          renderCameras();
+          renderLive();
+        });
+        actions.append(snapshot, video, test, remove);
+        row.append(enabled, name, rtsp, actions);
+        list.append(row);
+      });
+    }
+    function renderLive() {
+      const grid = document.getElementById("liveGrid");
+      grid.innerHTML = "";
+      const visible = cameras
+        .map((camera, index) => ({camera: normalizeCamera(camera), index}))
+        .filter(item => item.camera.enabled && item.camera.rtsp_url.trim());
+      for (const item of visible) {
+        const camera = item.camera;
+        const index = item.index;
+        const card = document.createElement("div");
+        card.className = "live-card";
+        const title = document.createElement("h3");
+        title.textContent = camera.name || camera.rtsp_url;
+        const img = document.createElement("img");
+        img.alt = title.textContent;
+        img.src = `/api/camera/video?index=${index}&ts=${Date.now()}`;
+        card.append(title, img);
+        grid.append(card);
+      }
+      setStatus("liveStatus", visible.length ? `Showing ${visible.length} camera(s)` : "No enabled cameras", visible.length ? "ok" : "warn");
     }
 
     document.querySelectorAll(".tab-btn").forEach(btn => btn.addEventListener("click", () => showTab(btn.dataset.tab)));
@@ -562,6 +746,25 @@ INDEX_HTML = r"""
       }
     });
     document.getElementById("refreshStatusBtn").addEventListener("click", loadStatus);
+    document.getElementById("addCameraBtn").addEventListener("click", () => {
+      cameras.push({enabled: true, name: "", rtsp_url: document.getElementById("rtsp_url").value.trim()});
+      renderCameras();
+      renderLive();
+    });
+    document.getElementById("saveCamerasBtn").addEventListener("click", async () => {
+      try {
+        const data = await api("/api/config", {
+          method: "POST",
+          headers: {"Content-Type": "application/json"},
+          body: JSON.stringify(collectConfig())
+        });
+        renderConfig(data.config);
+        setStatus("cameraStatus", "Saved", "ok");
+      } catch (err) {
+        setStatus("cameraStatus", err.message, "err");
+      }
+    });
+    document.getElementById("refreshLiveBtn").addEventListener("click", renderLive);
     document.getElementById("refreshEventsBtn").addEventListener("click", loadEvents);
     document.getElementById("testAiBtn").addEventListener("click", async () => {
       try {
@@ -675,7 +878,28 @@ def read_config() -> dict[str, Any]:
     config = read_stored_config()
     env_values, _ = env_config_values()
     config.update(env_values)
+    config["cameras"] = normalize_cameras(config)
     return config
+
+
+def normalize_cameras(config: dict[str, Any]) -> list[dict[str, Any]]:
+    raw_cameras = config.get("cameras", [])
+    cameras: list[dict[str, Any]] = []
+    if isinstance(raw_cameras, list):
+        for index, camera in enumerate(raw_cameras):
+            if not isinstance(camera, dict):
+                continue
+            rtsp_url = str(camera.get("rtsp_url", "")).strip()
+            name = str(camera.get("name", "")).strip() or f"Camera {index + 1}"
+            cameras.append({
+                "enabled": camera.get("enabled") is not False,
+                "name": name,
+                "rtsp_url": rtsp_url,
+            })
+    fallback_rtsp = str(config.get("rtsp_url", "")).strip()
+    if not cameras and fallback_rtsp:
+        cameras.append({"enabled": True, "name": "Default", "rtsp_url": fallback_rtsp})
+    return cameras
 
 
 def write_config(config: dict[str, Any]) -> dict[str, Any]:
@@ -683,6 +907,7 @@ def write_config(config: dict[str, Any]) -> dict[str, Any]:
     clean = DEFAULT_CONFIG.copy()
     for key in clean:
         clean[key] = config.get(key, clean[key])
+    clean["cameras"] = normalize_cameras(clean)
     clean["confidence"] = clamp_float(clean["confidence"], 0.01, 1.0, "confidence")
     clean["verify_interval"] = positive_int(clean["verify_interval"], "verify_interval")
     clean["alert_cooldown"] = positive_int(clean["alert_cooldown"], "alert_cooldown")
@@ -720,6 +945,20 @@ def require_config(config: dict[str, Any], keys: list[str]) -> None:
     missing = [key for key in keys if not str(config.get(key, "")).strip()]
     if missing:
         raise ValueError(f"Missing required config: {', '.join(missing)}")
+
+
+def camera_snapshot_path(index: int) -> Path:
+    return DATA_DIR / f"camera_{index}.jpg"
+
+
+def get_camera(config: dict[str, Any], index: int) -> dict[str, Any]:
+    cameras = normalize_cameras(config)
+    if index < 0 or index >= len(cameras):
+        raise ValueError("Invalid camera index")
+    camera = cameras[index]
+    if not str(camera.get("rtsp_url", "")).strip():
+        raise ValueError("Camera RTSP URL is empty")
+    return camera
 
 
 def set_state(**updates: Any) -> None:
@@ -895,11 +1134,10 @@ def send_telegram(photo_path: Path, message: str, config: dict[str, Any]) -> Non
     response.raise_for_status()
 
 
-def capture_snapshot(config: dict[str, Any], output_path: Path = SNAPSHOT_PATH) -> Path:
-    require_config(config, ["rtsp_url"])
+def capture_rtsp_snapshot(rtsp_url: str, output_path: Path) -> Path:
     import cv2
 
-    cap = cv2.VideoCapture(config["rtsp_url"])
+    cap = cv2.VideoCapture(rtsp_url)
     try:
         ok, frame = cap.read()
         if not ok:
@@ -911,83 +1149,117 @@ def capture_snapshot(config: dict[str, Any], output_path: Path = SNAPSHOT_PATH) 
     return output_path
 
 
+def capture_snapshot(config: dict[str, Any], output_path: Path = SNAPSHOT_PATH) -> Path:
+    require_config(config, ["rtsp_url"])
+    return capture_rtsp_snapshot(str(config["rtsp_url"]), output_path)
+
+
+def capture_camera_snapshot(config: dict[str, Any], index: int) -> Path:
+    camera = get_camera(config, index)
+    return capture_rtsp_snapshot(str(camera["rtsp_url"]), camera_snapshot_path(index))
+
+
+def mjpeg_frames(rtsp_url: str):
+    import cv2
+
+    cap = cv2.VideoCapture(rtsp_url)
+    try:
+      while True:
+          ok, frame = cap.read()
+          if not ok:
+              time.sleep(0.5)
+              continue
+          ok, encoded = cv2.imencode(".jpg", frame)
+          if not ok:
+              continue
+          yield b"--frame\r\nContent-Type: image/jpeg\r\n\r\n" + encoded.tobytes() + b"\r\n"
+          time.sleep(0.08)
+    finally:
+        cap.release()
+
+
 def monitor_loop(config: dict[str, Any]) -> None:
     import cv2
     from ultralytics import YOLO
 
-    require_config(config, ["rtsp_url", "yolo_model"])
+    cameras = [camera for camera in normalize_cameras(config) if camera.get("enabled") and camera.get("rtsp_url")]
+    if not cameras:
+        raise ValueError("No enabled cameras")
+    require_config(config, ["yolo_model"])
     logger.info("[MONITOR] loading YOLO model=%s", config["yolo_model"])
     model = YOLO(config["yolo_model"])
-    cap = cv2.VideoCapture(config["rtsp_url"])
-    frame_count = 0
-    last_verify = 0.0
-    last_alert = 0.0
+    caps = [cv2.VideoCapture(camera["rtsp_url"]) for camera in cameras]
+    frame_counts = [0 for _ in cameras]
+    last_verify = [0.0 for _ in cameras]
+    last_alert = [0.0 for _ in cameras]
+    total_frames = 0
     set_state(running=True, started_at=now_iso(), last_error="")
-    add_event("started", message="Monitor started")
+    add_event("started", message=f"Monitor started for {len(cameras)} camera(s)")
 
     try:
         while not stop_event.is_set():
-            ok, frame = cap.read()
-            if not ok:
-                logger.warning("[RTSP] reconnect stream")
-                set_state(last_error="RTSP read failed, reconnecting")
-                add_event("rtsp_reconnect", message="RTSP read failed")
-                time.sleep(2)
-                cap.release()
-                cap = cv2.VideoCapture(config["rtsp_url"])
-                continue
+            for index, camera in enumerate(cameras):
+                camera_name = str(camera["name"])
+                ok, frame = caps[index].read()
+                if not ok:
+                    logger.warning("[RTSP] reconnect stream camera=%s", camera_name)
+                    set_state(last_error=f"RTSP read failed for {camera_name}, reconnecting", last_camera=camera_name)
+                    add_event("rtsp_reconnect", camera=camera_name, message="RTSP read failed")
+                    caps[index].release()
+                    caps[index] = cv2.VideoCapture(camera["rtsp_url"])
+                    continue
 
-            frame_count += 1
-            set_state(frames=frame_count)
-            if frame_count % int(config["frame_skip"]) != 0:
-                continue
+                frame_counts[index] += 1
+                total_frames += 1
+                set_state(frames=total_frames, last_camera=camera_name)
+                if frame_counts[index] % int(config["frame_skip"]) != 0:
+                    continue
 
-            results = model(frame, verbose=False, conf=float(config["confidence"]))
-            person_detected = False
-            best_confidence = 0.0
-            for result in results:
-                for box in result.boxes:
-                    if int(box.cls[0]) == 0:
-                        person_detected = True
-                        best_confidence = max(best_confidence, float(box.conf[0]))
+                results = model(frame, verbose=False, conf=float(config["confidence"]))
+                person_detected = False
+                best_confidence = 0.0
+                for result in results:
+                    for box in result.boxes:
+                        if int(box.cls[0]) == 0:
+                            person_detected = True
+                            best_confidence = max(best_confidence, float(box.conf[0]))
 
-            if person_detected:
-                set_state(last_person_confidence=best_confidence, last_error="")
-                logger.info("[PERSON] detected confidence=%.2f", best_confidence)
-                now = time.time()
-                if now - last_verify > float(config["verify_interval"]):
-                    ensure_data_dir()
-                    cv2.imwrite(str(VERIFY_PATH), frame)
-                    cv2.imwrite(str(SNAPSHOT_PATH), frame)
-                    try:
-                        ai_result, raw = verify_scene(VERIFY_PATH, config)
-                        last_verify = now
-                        set_state(last_ai_result=ai_result, last_verify_at=now_iso(), last_error="")
-                        add_event("verified", confidence=best_confidence, ai_result=ai_result, message=raw)
-                    except Exception as exc:
-                        last_verify = now
-                        set_state(last_error=str(exc), last_verify_at=now_iso())
-                        add_event("ai_error", confidence=best_confidence, error=str(exc))
-                        ai_result = "SAFE"
+                if person_detected:
+                    set_state(last_person_confidence=best_confidence, last_error="", last_camera=camera_name)
+                    logger.info("[PERSON] camera=%s confidence=%.2f", camera_name, best_confidence)
+                    now = time.time()
+                    if now - last_verify[index] > float(config["verify_interval"]):
+                        ensure_data_dir()
+                        verify_path = camera_snapshot_path(index)
+                        cv2.imwrite(str(verify_path), frame)
+                        cv2.imwrite(str(SNAPSHOT_PATH), frame)
+                        try:
+                            ai_result, raw = verify_scene(verify_path, config)
+                            last_verify[index] = now
+                            set_state(last_ai_result=ai_result, last_verify_at=now_iso(), last_error="")
+                            add_event("verified", camera=camera_name, confidence=best_confidence, ai_result=ai_result, message=raw)
+                        except Exception as exc:
+                            last_verify[index] = now
+                            set_state(last_error=str(exc), last_verify_at=now_iso())
+                            add_event("ai_error", camera=camera_name, confidence=best_confidence, error=str(exc))
+                            ai_result = "SAFE"
 
-                    if ai_result == "EMERGENCY":
-                        if now - last_alert > float(config["alert_cooldown"]):
-                            try:
-                                send_telegram(
-                                    VERIFY_PATH,
-                                    "⚠️ AI phát hiện người có thể bị té ngã hoặc gặp nguy hiểm!",
-                                    config,
-                                )
-                                last_alert = now
-                                set_state(last_alert_at=now_iso())
-                                add_event("telegram_sent", confidence=best_confidence, ai_result=ai_result)
-                            except Exception as exc:
-                                set_state(last_error=str(exc))
-                                add_event("telegram_error", confidence=best_confidence, error=str(exc))
-                        else:
-                            add_event("cooldown", confidence=best_confidence, ai_result=ai_result)
-            else:
-                set_state(last_person_confidence=0)
+                        if ai_result == "EMERGENCY":
+                            if now - last_alert[index] > float(config["alert_cooldown"]):
+                                try:
+                                    send_telegram(
+                                        verify_path,
+                                        f"⚠️ AI phát hiện người có thể bị té ngã hoặc gặp nguy hiểm!\nCamera: {camera_name}",
+                                        config,
+                                    )
+                                    last_alert[index] = now
+                                    set_state(last_alert_at=now_iso())
+                                    add_event("telegram_sent", camera=camera_name, confidence=best_confidence, ai_result=ai_result)
+                                except Exception as exc:
+                                    set_state(last_error=str(exc))
+                                    add_event("telegram_error", camera=camera_name, confidence=best_confidence, error=str(exc))
+                            else:
+                                add_event("cooldown", camera=camera_name, confidence=best_confidence, ai_result=ai_result)
 
             time.sleep(float(config["loop_sleep"]))
     except Exception as exc:
@@ -995,7 +1267,8 @@ def monitor_loop(config: dict[str, Any]) -> None:
         set_state(last_error=str(exc))
         add_event("monitor_error", error=str(exc))
     finally:
-        cap.release()
+        for cap in caps:
+            cap.release()
         set_state(running=False)
         add_event("stopped", message="Monitor stopped")
 
@@ -1035,7 +1308,9 @@ def api_start() -> JSONResponse:
         return JSONResponse({"success": True, "message": "already running", "status": read_state()})
     try:
         config = read_config()
-        require_config(config, ["rtsp_url", "yolo_model"])
+        if not [camera for camera in normalize_cameras(config) if camera.get("enabled") and camera.get("rtsp_url")]:
+            raise ValueError("No enabled cameras")
+        require_config(config, ["yolo_model"])
     except ValueError as exc:
         return JSONResponse({"success": False, "error": str(exc)}, status_code=400)
     stop_event.clear()
@@ -1053,7 +1328,9 @@ def api_stop() -> JSONResponse:
 @app.post("/api/capture")
 def api_capture() -> JSONResponse:
     try:
-        path = capture_snapshot(read_config())
+        config = read_config()
+        cameras = normalize_cameras(config)
+        path = capture_camera_snapshot(config, 0) if cameras else capture_snapshot(config)
         add_event("snapshot", message=f"Captured {path.name}")
         return JSONResponse({"success": True, "message": "snapshot captured"})
     except Exception as exc:
@@ -1066,6 +1343,27 @@ def api_snapshot() -> Response:
     if not SNAPSHOT_PATH.exists():
         return Response(status_code=204)
     return Response(SNAPSHOT_PATH.read_bytes(), media_type="image/jpeg")
+
+
+@app.get("/api/camera/snapshot")
+def api_camera_snapshot(index: int = 0) -> Response:
+    try:
+        path = capture_camera_snapshot(read_config(), index)
+    except Exception as exc:
+        return JSONResponse({"success": False, "error": str(exc)}, status_code=500)
+    return Response(path.read_bytes(), media_type="image/jpeg")
+
+
+@app.get("/api/camera/video")
+def api_camera_video(index: int = 0) -> StreamingResponse:
+    try:
+        camera = get_camera(read_config(), index)
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return StreamingResponse(
+        mjpeg_frames(str(camera["rtsp_url"])),
+        media_type="multipart/x-mixed-replace; boundary=frame",
+    )
 
 
 @app.get("/api/events")
@@ -1083,6 +1381,20 @@ def api_test_ai() -> JSONResponse:
         return JSONResponse({"success": True, "result": result, "raw": raw})
     except Exception as exc:
         add_event("test_ai_error", error=str(exc))
+        return JSONResponse({"success": False, "error": str(exc)}, status_code=500)
+
+
+@app.post("/api/test-ai-camera")
+def api_test_ai_camera(index: int = 0) -> JSONResponse:
+    try:
+        config = read_config()
+        path = capture_camera_snapshot(config, index)
+        result, raw = verify_scene(path, config)
+        camera = get_camera(config, index)
+        add_event("test_ai_camera", camera=camera["name"], ai_result=result, message=raw)
+        return JSONResponse({"success": True, "camera": camera["name"], "result": result, "raw": raw})
+    except Exception as exc:
+        add_event("test_ai_camera_error", error=str(exc))
         return JSONResponse({"success": False, "error": str(exc)}, status_code=500)
 
 

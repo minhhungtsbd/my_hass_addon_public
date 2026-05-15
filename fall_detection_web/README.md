@@ -119,9 +119,39 @@ Không commit file `.env` hoặc `data/config.json` vì có thể chứa token/A
 Các tab chính:
 
 - **Dashboard**: Start/Stop monitor, capture snapshot, xem snapshot mới nhất.
+- **Cameras**: thêm nhiều camera RTSP, bật/tắt từng camera, xem snapshot/video và test AI từng camera.
+- **Live**: xem nhiều camera cùng lúc bằng MJPEG proxy từ RTSP.
 - **Settings**: cấu hình RTSP, AI, YOLO, Telegram và timeout/cooldown.
 - **Events**: log các trạng thái `started`, `verified`, `telegram_sent`, `ai_error`, `rtsp_reconnect`.
 - **Tools**: test AI bằng snapshot mới nhất, upload ảnh test AI, test Telegram.
+
+## Nhiều Camera
+
+Danh sách camera được lưu trong `data/config.json`:
+
+```json
+{
+  "cameras": [
+    {
+      "enabled": true,
+      "name": "bep",
+      "rtsp_url": "rtsp://10.10.0.2:8554/bep_sub"
+    }
+  ]
+}
+```
+
+Trường `rtsp_url` ở Settings vẫn được giữ làm fallback cho cấu hình cũ. Nếu chưa có `cameras`, app sẽ tự tạo một camera mặc định từ `rtsp_url`.
+
+Các endpoint camera:
+
+```http
+GET /api/camera/snapshot?index=0
+GET /api/camera/video?index=0
+POST /api/test-ai-camera?index=0
+```
+
+`/api/camera/video` trả MJPEG stream để browser xem trực tiếp được, thay vì mở RTSP raw.
 
 ## Chạy Nền Bằng systemd
 

@@ -1,5 +1,12 @@
 {
   "rtsp_url": "rtsp://10.10.0.2:8554/bep_sub",
+  "cameras": [
+    {
+      "enabled": true,
+      "name": "bep",
+      "rtsp_url": "rtsp://10.10.0.2:8554/bep_sub"
+    }
+  ],
   "telegram_bot_token": "",
   "telegram_chat_id": "",
   "ai_base_url": "https://9router.minhhungtsbd.me/v1",
