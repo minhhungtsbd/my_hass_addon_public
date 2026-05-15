@@ -162,21 +162,27 @@ INDEX_HTML = r"""
       color: var(--danger);
       background: transparent;
     }
-    .camera-head {
+    .camera-head,
+    .camera-row {
+      --camera-grid: 42px minmax(96px, .85fr) minmax(136px, 1.15fr) minmax(126px, 1fr) minmax(96px, .85fr) repeat(4, max-content);
       display: grid;
-      grid-template-columns: 42px minmax(82px, .85fr) minmax(120px, 1.15fr) minmax(112px, 1fr) minmax(82px, .85fr) repeat(4, max-content);
+      grid-template-columns: var(--camera-grid);
       gap: 6px;
+      align-items: center;
+    }
+    .camera-head {
       color: var(--muted);
       font-size: 12px;
       font-weight: 700;
       margin-bottom: 6px;
     }
     .camera-row {
-      display: grid;
-      grid-template-columns: 42px minmax(82px, .85fr) minmax(120px, 1.15fr) minmax(112px, 1fr) minmax(82px, .85fr) repeat(4, max-content);
-      gap: 6px;
       margin-bottom: 8px;
-      align-items: center;
+    }
+    .camera-head > div,
+    .camera-row > div,
+    .camera-row > label {
+      min-width: 0;
     }
     .camera-row button {
       padding: 9px 10px;
@@ -330,6 +336,10 @@ INDEX_HTML = r"""
         border-radius: 8px;
         padding: 10px;
         gap: 10px;
+      }
+      .camera-head,
+      .camera-row {
+        --camera-grid: 1fr;
       }
       .camera-row button { padding: 10px 14px; }
       .camera-head { display: none; }
