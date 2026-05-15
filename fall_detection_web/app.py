@@ -1,6 +1,7 @@
 import base64
 import json
 import logging
+import os
 import threading
 import time
 from datetime import datetime, timezone
@@ -15,6 +16,7 @@ from fastapi.responses import HTMLResponse, JSONResponse, Response
 ROOT = Path(__file__).resolve().parent
 DATA_DIR = ROOT / "data"
 CONFIG_PATH = DATA_DIR / "config.json"
+ENV_PATH = ROOT / ".env"
 EVENTS_PATH = DATA_DIR / "events.jsonl"
 SNAPSHOT_PATH = DATA_DIR / "latest.jpg"
 VERIFY_PATH = DATA_DIR / "verify.jpg"
@@ -32,6 +34,28 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "alert_cooldown": 300,
     "frame_skip": 2,
     "loop_sleep": 0.3,
+}
+
+ENV_CONFIG_KEYS = {
+    "RTSP_URL": "rtsp_url",
+    "TELEGRAM_BOT_TOKEN": "telegram_bot_token",
+    "TELEGRAM_CHAT_ID": "telegram_chat_id",
+    "AI_BASE_URL": "ai_base_url",
+    "AI_API_KEY": "ai_api_key",
+    "VISION_MODEL": "vision_model",
+    "YOLO_MODEL": "yolo_model",
+    "CONFIDENCE": "confidence",
+    "VERIFY_INTERVAL": "verify_interval",
+    "ALERT_COOLDOWN": "alert_cooldown",
+    "FRAME_SKIP": "frame_skip",
+    "LOOP_SLEEP": "loop_sleep",
+}
+
+SECRET_CONFIG_KEYS = {
+    "rtsp_url",
+    "telegram_bot_token",
+    "telegram_chat_id",
+    "ai_api_key",
 }
 
 PROMPT = """Đây là ảnh camera giám sát người già trong nhà.
@@ -590,7 +614,50 @@ def ensure_data_dir() -> None:
     DATA_DIR.mkdir(parents=True, exist_ok=True)
 
 
-def read_config() -> dict[str, Any]:
+def parse_env_file(path: Path) -> dict[str, str]:
+    if not path.exists():
+        return {}
+    values: dict[str, str] = {}
+    for raw_line in path.read_text(encoding="utf-8", errors="replace").splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, value = line.split("=", 1)
+        key = key.strip()
+        value = value.strip().strip('"').strip("'")
+        if key:
+            values[key] = value
+    return values
+
+
+def coerce_config_value(key: str, value: str) -> Any:
+    if key in {"verify_interval", "alert_cooldown", "frame_skip"}:
+        return positive_int(value, key)
+    if key == "confidence":
+        return clamp_float(value, 0.01, 1.0, key)
+    if key == "loop_sleep":
+        return max(0.0, float(value))
+    return value
+
+
+def env_config_values() -> tuple[dict[str, Any], dict[str, str]]:
+    raw_env = parse_env_file(ENV_PATH)
+    raw_env.update(os.environ)
+    values: dict[str, Any] = {}
+    sources: dict[str, str] = {}
+    for env_key, config_key in ENV_CONFIG_KEYS.items():
+        raw_value = raw_env.get(env_key, "")
+        if raw_value == "":
+            continue
+        try:
+            values[config_key] = coerce_config_value(config_key, raw_value)
+            sources[config_key] = env_key
+        except ValueError as exc:
+            logger.warning("Ignoring invalid %s value from environment: %s", env_key, exc)
+    return values, sources
+
+
+def read_stored_config() -> dict[str, Any]:
     ensure_data_dir()
     if not CONFIG_PATH.exists():
         return DEFAULT_CONFIG.copy()
@@ -604,6 +671,13 @@ def read_config() -> dict[str, Any]:
     return config
 
 
+def read_config() -> dict[str, Any]:
+    config = read_stored_config()
+    env_values, _ = env_config_values()
+    config.update(env_values)
+    return config
+
+
 def write_config(config: dict[str, Any]) -> dict[str, Any]:
     ensure_data_dir()
     clean = DEFAULT_CONFIG.copy()
@@ -614,8 +688,12 @@ def write_config(config: dict[str, Any]) -> dict[str, Any]:
     clean["alert_cooldown"] = positive_int(clean["alert_cooldown"], "alert_cooldown")
     clean["frame_skip"] = positive_int(clean["frame_skip"], "frame_skip")
     clean["loop_sleep"] = max(0.0, float(clean["loop_sleep"]))
+    env_values, _ = env_config_values()
+    for key in SECRET_CONFIG_KEYS:
+        if key in env_values and str(clean.get(key, "")) == str(env_values[key]):
+            clean[key] = ""
     CONFIG_PATH.write_text(json.dumps(clean, ensure_ascii=False, indent=2), encoding="utf-8")
-    return clean
+    return read_config()
 
 
 def positive_int(value: Any, name: str) -> int:
@@ -929,7 +1007,8 @@ def index() -> HTMLResponse:
 
 @app.get("/api/config")
 def api_config() -> JSONResponse:
-    return JSONResponse({"success": True, "config": read_config()})
+    _, sources = env_config_values()
+    return JSONResponse({"success": True, "config": read_config(), "env_sources": sources})
 
 
 @app.post("/api/config")
