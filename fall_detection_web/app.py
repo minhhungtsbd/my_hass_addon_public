@@ -296,6 +296,44 @@ INDEX_HTML = r"""
       background: #03070b;
       display: block;
     }
+    dialog {
+      width: min(960px, calc(100vw - 28px));
+      max-height: calc(100vh - 28px);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: var(--panel);
+      color: var(--text);
+      padding: 0;
+    }
+    dialog::backdrop {
+      background: rgba(0, 0, 0, .72);
+    }
+    .viewer-head {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 12px;
+      padding: 12px;
+      border-bottom: 1px solid var(--line);
+    }
+    .viewer-head h2 {
+      margin: 0;
+      font-size: 16px;
+    }
+    .viewer-actions {
+      display: flex;
+      gap: 8px;
+    }
+    .viewer-body {
+      padding: 12px;
+      background: #03070b;
+    }
+    .viewer-body img {
+      width: 100%;
+      max-height: calc(100vh - 160px);
+      object-fit: contain;
+      display: block;
+    }
     img.preview {
       width: 100%;
       max-height: 560px;
@@ -341,6 +379,11 @@ INDEX_HTML = r"""
       }
       .camera-actions {
         flex-direction: column;
+      }
+      .viewer-head,
+      .viewer-actions {
+        flex-direction: column;
+        align-items: stretch;
       }
       button { width: 100%; }
       .actions { align-items: stretch; flex-direction: column; }
@@ -518,10 +561,24 @@ INDEX_HTML = r"""
         <pre id="toolResult">{}</pre>
       </div>
     </section>
+
+    <dialog id="viewerDialog">
+      <div class="viewer-head">
+        <h2 id="viewerTitle">Viewer</h2>
+        <div class="viewer-actions">
+          <button id="refreshViewerBtn" type="button">Refresh</button>
+          <button id="openViewerBtn" type="button">Open Tab</button>
+          <button id="closeViewerBtn" type="button">Close</button>
+        </div>
+      </div>
+      <div id="viewerBody" class="viewer-body"></div>
+    </dialog>
   </main>
 
   <script>
     let cameras = [];
+    let currentViewerUrl = "";
+    let currentViewerMode = "";
     const numericIds = ["confidence", "verify_interval", "alert_cooldown", "frame_skip", "loop_sleep"];
     const configIds = [
       "rtsp_url", "ai_base_url", "ai_api_key", "vision_model", "verify_prompt", "yolo_model",
@@ -606,6 +663,26 @@ INDEX_HTML = r"""
       }
       setStatus("eventsStatus", `Loaded ${events.length} events`, "ok");
     }
+    function showViewer(title, url, mode) {
+      currentViewerUrl = url;
+      currentViewerMode = mode;
+      document.getElementById("viewerTitle").textContent = title;
+      const body = document.getElementById("viewerBody");
+      body.innerHTML = "";
+      const img = document.createElement("img");
+      img.alt = title;
+      img.src = mode === "snapshot" ? `${url}${url.includes("?") ? "&" : "?"}ts=${Date.now()}` : url;
+      body.append(img);
+      document.getElementById("refreshViewerBtn").style.display = mode === "snapshot" ? "" : "none";
+      document.getElementById("viewerDialog").showModal();
+    }
+    function closeViewer() {
+      const body = document.getElementById("viewerBody");
+      body.innerHTML = "";
+      document.getElementById("viewerDialog").close();
+      currentViewerUrl = "";
+      currentViewerMode = "";
+    }
     async function loadConfig() {
       const data = await api("/api/config");
       renderConfig(data.config);
@@ -653,11 +730,19 @@ INDEX_HTML = r"""
         const snapshot = document.createElement("button");
         snapshot.type = "button";
         snapshot.textContent = "Snapshot";
-        snapshot.addEventListener("click", () => window.open(`/api/camera/snapshot?index=${index}&ts=${Date.now()}`, "_blank"));
+        snapshot.addEventListener("click", () => showViewer(
+          `Snapshot: ${camera.name || "Camera " + (index + 1)}`,
+          `/api/camera/snapshot?index=${index}`,
+          "snapshot"
+        ));
         const video = document.createElement("button");
         video.type = "button";
         video.textContent = "Video";
-        video.addEventListener("click", () => window.open(`/api/camera/video?index=${index}`, "_blank"));
+        video.addEventListener("click", () => showViewer(
+          `Video: ${camera.name || "Camera " + (index + 1)}`,
+          `/api/camera/video?index=${index}`,
+          "video"
+        ));
         const test = document.createElement("button");
         test.type = "button";
         test.textContent = "Test AI";
@@ -769,6 +854,18 @@ INDEX_HTML = r"""
     });
     document.getElementById("refreshLiveBtn").addEventListener("click", renderLive);
     document.getElementById("refreshEventsBtn").addEventListener("click", loadEvents);
+    document.getElementById("refreshViewerBtn").addEventListener("click", () => {
+      if (currentViewerUrl && currentViewerMode === "snapshot") {
+        showViewer(document.getElementById("viewerTitle").textContent, currentViewerUrl, currentViewerMode);
+      }
+    });
+    document.getElementById("openViewerBtn").addEventListener("click", () => {
+      if (currentViewerUrl) window.open(currentViewerUrl, "_blank");
+    });
+    document.getElementById("closeViewerBtn").addEventListener("click", closeViewer);
+    document.getElementById("viewerDialog").addEventListener("close", () => {
+      document.getElementById("viewerBody").innerHTML = "";
+    });
     document.getElementById("testAiBtn").addEventListener("click", async () => {
       try {
         const data = await api("/api/test-ai", {method: "POST", timeout: 140000});
