@@ -126,7 +126,7 @@ INDEX_HTML = r"""
       border-radius: 4px;
       padding: 1px 4px;
     }
-    input, textarea {
+    input, textarea, select {
       width: 100%;
       border: 1px solid var(--line);
       border-radius: 6px;
@@ -458,6 +458,11 @@ INDEX_HTML = r"""
           <div class="hint">Chỉ nhập base URL, không nhập <code>/api/frame.jpeg?src=...</code>.</div>
         </div>
         <div>
+          <label for="frigate_url">Frigate URL</label>
+          <input id="frigate_url" autocomplete="off" placeholder="Optional, e.g. http://ccab4aaf-frigate:5000">
+          <div class="hint">Used to load cameras from the Frigate add-on when no standalone go2rtc URL is configured.</div>
+        </div>
+        <div>
           <label for="ai_base_url">AI Base URL</label>
           <input id="ai_base_url" autocomplete="off" placeholder="https://api.openai.com/v1 hoặc http://9router.local:20128/v1">
         </div>
@@ -637,7 +642,7 @@ cháy"></textarea>
 
   <script>
     const fields = [
-      "go2rtc_url", "ai_api_key", "ai_base_url", "ai_model",
+      "go2rtc_url", "frigate_url", "ai_api_key", "ai_base_url", "ai_model",
       "telegram_bot_token", "telegram_chat_id", "prompt",
       "ai_timeout", "snapshot_timeout", "telegram_timeout",
       "mqtt_host", "mqtt_port", "mqtt_topic", "mqtt_username",
@@ -1125,13 +1130,26 @@ cháy"></textarea>
     async function loadGo2rtcStreams() {
       setStatus("streamStatus", "Loading go2rtc streams...", "");
       try {
-        const {response, data} = await requestJson("api/go2rtc/streams", {}, 15000);
+        const params = new URLSearchParams();
+        const currentGo2rtc = document.getElementById("go2rtc_url").value.trim();
+        const currentFrigate = document.getElementById("frigate_url").value.trim();
+        if (currentGo2rtc) params.set("go2rtc_url", currentGo2rtc);
+        if (currentFrigate) params.set("frigate_url", currentFrigate);
+        const path = `api/go2rtc/streams${params.toString() ? "?" + params.toString() : ""}`;
+        const {response, data} = await requestJson(path, {}, 15000);
         if (!response.ok || !data.success) {
           setStatus("streamStatus", data.error || "Could not load go2rtc streams", "err");
           return;
         }
         renderGo2rtcStreams(data.streams || []);
-        setStatus("streamStatus", `Loaded ${(data.streams || []).length} go2rtc streams`, "ok");
+        if (data.go2rtc_url) {
+          document.getElementById("go2rtc_url").value = data.go2rtc_url;
+        }
+        if (data.frigate_url) {
+          document.getElementById("frigate_url").value = data.frigate_url;
+        }
+        const source = data.source ? ` from ${data.source}` : "";
+        setStatus("streamStatus", `Loaded ${(data.streams || []).length} stream(s)${source}`, "ok");
       } catch (err) {
         setStatus("streamStatus", err.name === "AbortError" ? "go2rtc stream load timeout" : err.message, "err");
       }
@@ -1464,6 +1482,7 @@ def upstream_error_response(exc: requests.HTTPError) -> JSONResponse:
 def default_options() -> dict[str, Any]:
     return {
         "go2rtc_url": "",
+        "frigate_url": "",
         "ai_api_key": "",
         "ai_base_url": "https://api.openai.com/v1",
         "ai_model": "gpt-4o-mini",
@@ -1691,9 +1710,26 @@ def validate_entity_id(entity_id: Any) -> str:
     return entity_id
 
 
+def resolve_go2rtc_url(options: dict[str, Any]) -> str:
+    base_url = str(options.get("go2rtc_url", "")).strip().rstrip("/")
+    if base_url:
+        return base_url
+
+    timeout = max(1, min(int(options.get("snapshot_timeout", 10)), 5))
+    for candidate in frigate_go2rtc_candidates(options):
+        try:
+            request_go2rtc_streams(candidate, timeout)
+            logger.info("Using Frigate go2rtc URL=%s", candidate)
+            return candidate
+        except (ValueError, requests.RequestException) as exc:
+            logger.info("Frigate go2rtc snapshot candidate failed url=%s error=%s", candidate, exc)
+
+    raise ValueError("go2rtc_url is required")
+
+
 def fetch_snapshot(camera: str, options: dict[str, Any]) -> str:
     logger.info("Fetching snapshot for camera=%s", camera)
-    base_url = options["go2rtc_url"].rstrip("/")
+    base_url = resolve_go2rtc_url(options)
     url = f"{base_url}/api/frame.jpeg"
 
     response = requests.get(
@@ -1965,22 +2001,7 @@ def cleanup_file(path: str | None) -> None:
             logger.warning("Could not remove temp file: %s", path)
 
 
-def get_go2rtc_streams(options: dict[str, Any]) -> list[dict[str, str]]:
-    base_url = str(options.get("go2rtc_url", "")).strip().rstrip("/")
-    if not base_url:
-        raise ValueError("go2rtc_url is required")
-
-    response = requests.get(
-        f"{base_url}/api/streams",
-        timeout=options.get("snapshot_timeout", 10),
-    )
-    response.raise_for_status()
-
-    try:
-        data = response.json()
-    except ValueError as exc:
-        raise ValueError("go2rtc returned non-JSON response") from exc
-
+def parse_go2rtc_streams_payload(data: Any) -> list[dict[str, str]]:
     streams: list[dict[str, str]] = []
     if isinstance(data, dict):
         for key, value in data.items():
@@ -2007,6 +2028,217 @@ def get_go2rtc_streams(options: dict[str, Any]) -> list[dict[str, str]]:
         raise ValueError("go2rtc returned invalid streams payload")
 
     return sorted(streams, key=lambda stream: stream["src"])
+
+
+def request_go2rtc_streams(base_url: str, timeout: int) -> list[dict[str, str]]:
+    response = requests.get(
+        f"{base_url.rstrip('/')}/api/streams",
+        timeout=timeout,
+    )
+    response.raise_for_status()
+
+    try:
+        data = response.json()
+    except ValueError as exc:
+        raise ValueError("go2rtc returned non-JSON response") from exc
+
+    return parse_go2rtc_streams_payload(data)
+
+
+def parse_frigate_config_streams(data: Any) -> list[dict[str, str]]:
+    if not isinstance(data, dict):
+        raise ValueError("Frigate returned invalid config payload")
+
+    streams: dict[str, str] = {}
+    go2rtc = data.get("go2rtc", {})
+    if isinstance(go2rtc, dict) and isinstance(go2rtc.get("streams"), dict):
+        for src in go2rtc["streams"]:
+            name = str(src).strip()
+            if name:
+                streams[name] = name
+
+    cameras = data.get("cameras", {})
+    if isinstance(cameras, dict):
+        for camera_name, camera_config in cameras.items():
+            name = str(camera_name).strip()
+            if not name:
+                continue
+            streams.setdefault(name, name)
+
+    return [{"src": src, "name": name} for src, name in sorted(streams.items())]
+
+
+def request_frigate_config_streams(base_url: str, timeout: int) -> list[dict[str, str]]:
+    response = requests.get(
+        f"{base_url.rstrip('/')}/api/config",
+        timeout=timeout,
+    )
+    response.raise_for_status()
+
+    try:
+        data = response.json()
+    except ValueError as exc:
+        raise ValueError("Frigate returned non-JSON response") from exc
+
+    return parse_frigate_config_streams(data)
+
+
+def request_frigate_go2rtc_streams(base_url: str, timeout: int) -> list[dict[str, str]]:
+    response = requests.get(
+        f"{base_url.rstrip('/')}/api/go2rtc/streams",
+        timeout=timeout,
+    )
+    response.raise_for_status()
+
+    try:
+        data = response.json()
+    except ValueError as exc:
+        raise ValueError("Frigate go2rtc API returned non-JSON response") from exc
+
+    return parse_go2rtc_streams_payload(data)
+
+
+def supervisor_frigate_hosts(timeout: int) -> list[str]:
+    token = os.environ.get("SUPERVISOR_TOKEN", "")
+    if not token:
+        return []
+
+    try:
+        response = requests.get(
+            "http://supervisor/addons",
+            headers={"Authorization": f"Bearer {token}"},
+            timeout=timeout,
+        )
+        response.raise_for_status()
+        payload = response.json()
+    except (ValueError, requests.RequestException) as exc:
+        logger.warning("Could not discover Frigate add-on from Supervisor: %s", exc)
+        return []
+
+    addons = []
+    if isinstance(payload, dict):
+        raw_addons = payload.get("data", {}).get("addons") if isinstance(payload.get("data"), dict) else payload.get("addons")
+        if isinstance(raw_addons, list):
+            addons = raw_addons
+
+    hosts: list[str] = []
+    for addon in addons:
+        if not isinstance(addon, dict):
+            continue
+        slug = str(addon.get("slug") or addon.get("name") or "").strip()
+        if "frigate" not in slug.lower():
+            continue
+        hostname = str(addon.get("hostname") or "").strip()
+        for host in (hostname, slug.replace("_", "-"), slug):
+            if host and host not in hosts:
+                hosts.append(host)
+
+    return hosts
+
+
+def unique_urls(urls: list[str]) -> list[str]:
+    seen: set[str] = set()
+    result: list[str] = []
+    for url in urls:
+        clean = url.strip().rstrip("/")
+        if clean and clean not in seen:
+            seen.add(clean)
+            result.append(clean)
+    return result
+
+
+def frigate_go2rtc_candidates(options: dict[str, Any]) -> list[str]:
+    urls: list[str] = []
+    configured = str(options.get("frigate_url", "")).strip().rstrip("/")
+    if configured:
+        match = re.match(r"^(https?://[^/:]+)(?::\d+)?", configured)
+        if match:
+            urls.append(f"{match.group(1)}:1984")
+
+    for host in supervisor_frigate_hosts(3):
+        urls.append(f"http://{host}:1984")
+
+    urls.extend(
+        [
+            "http://ccab4aaf-frigate:1984",
+            "http://ccab4aaf_frigate:1984",
+            "http://frigate:1984",
+        ]
+    )
+    return unique_urls(urls)
+
+
+def frigate_api_candidates(options: dict[str, Any]) -> list[str]:
+    urls: list[str] = []
+    configured = str(options.get("frigate_url", "")).strip().rstrip("/")
+    if configured:
+        urls.append(configured)
+
+    for host in supervisor_frigate_hosts(3):
+        urls.append(f"http://{host}:5000")
+
+    urls.extend(
+        [
+            "http://ccab4aaf-frigate:5000",
+            "http://ccab4aaf_frigate:5000",
+            "http://frigate:5000",
+        ]
+    )
+    return unique_urls(urls)
+
+
+def get_go2rtc_streams(options: dict[str, Any]) -> dict[str, Any]:
+    timeout = int(options.get("snapshot_timeout", 10))
+    base_url = str(options.get("go2rtc_url", "")).strip().rstrip("/")
+    last_error = "go2rtc_url is required"
+    if base_url:
+        try:
+            return {
+                "streams": request_go2rtc_streams(base_url, timeout),
+                "go2rtc_url": base_url,
+                "source": "go2rtc",
+            }
+        except (ValueError, requests.RequestException) as exc:
+            last_error = str(exc)
+            logger.info("Configured go2rtc failed url=%s error=%s", base_url, exc)
+
+    for candidate in frigate_go2rtc_candidates(options):
+        try:
+            streams = request_go2rtc_streams(candidate, timeout)
+            return {
+                "streams": streams,
+                "go2rtc_url": candidate,
+                "source": "Frigate go2rtc",
+            }
+        except (ValueError, requests.RequestException) as exc:
+            last_error = str(exc)
+            logger.info("Frigate go2rtc candidate failed url=%s error=%s", candidate, exc)
+
+    for candidate in frigate_api_candidates(options):
+        try:
+            streams = request_frigate_go2rtc_streams(candidate, timeout)
+            return {
+                "streams": streams,
+                "frigate_url": candidate,
+                "source": "Frigate go2rtc proxy",
+            }
+        except (ValueError, requests.RequestException) as exc:
+            last_error = str(exc)
+            logger.info("Frigate go2rtc proxy candidate failed url=%s error=%s", candidate, exc)
+
+    for candidate in frigate_api_candidates(options):
+        try:
+            streams = request_frigate_config_streams(candidate, timeout)
+            return {
+                "streams": streams,
+                "frigate_url": candidate,
+                "source": "Frigate config",
+            }
+        except (ValueError, requests.RequestException) as exc:
+            last_error = str(exc)
+            logger.info("Frigate API candidate failed url=%s error=%s", candidate, exc)
+
+    raise ValueError(f"could not load go2rtc or Frigate streams: {last_error}")
 
 
 def record_event(
@@ -2243,10 +2475,16 @@ def hass_triggers() -> JSONResponse:
 
 
 @app.get("/api/go2rtc/streams")
-def go2rtc_streams() -> JSONResponse:
+def go2rtc_streams(go2rtc_url: str = "", frigate_url: str = "") -> JSONResponse:
     try:
         options = read_options()
-        return JSONResponse({"success": True, "streams": get_go2rtc_streams(options)})
+        if go2rtc_url.strip():
+            options["go2rtc_url"] = go2rtc_url.strip()
+        if frigate_url.strip():
+            options["frigate_url"] = frigate_url.strip()
+        payload = get_go2rtc_streams(options)
+        payload["success"] = True
+        return JSONResponse(payload)
     except ValueError as exc:
         logger.error("%s", exc)
         return error_response(str(exc), 400)

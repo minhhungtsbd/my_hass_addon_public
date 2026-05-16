@@ -378,3 +378,21 @@ curl -X POST http://<home-assistant-ip>:8000/analyze \
   -H "Content-Type: application/json" \
   -d '{"entity_id":"camera.camera_bep_go2rtc"}'
 ```
+
+## Frigate Add-on Streams
+
+Simple AI Vision can discover camera names from the Frigate add-on when loading go2rtc streams. It tries the configured `go2rtc_url` first, then Frigate built-in go2rtc on port `1984`, then Frigate API on port `5000`.
+
+Use the optional `frigate_url` setting when auto-discovery cannot find the Frigate add-on, for example:
+
+```text
+http://ccab4aaf-frigate:5000
+```
+
+Snapshot analysis still uses go2rtc:
+
+```text
+{go2rtc_url}/api/frame.jpeg?src=<camera>
+```
+
+If Frigate cameras load but snapshots fail, expose/enable the Frigate go2rtc API port `1984` or enter a reachable go2rtc URL manually.
