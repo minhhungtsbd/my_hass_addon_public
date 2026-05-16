@@ -11,11 +11,6 @@ import requests
 from fastapi import FastAPI, Request
 from fastapi.responses import HTMLResponse, JSONResponse, Response
 
-try:
-    import paho.mqtt.publish as mqtt_publish
-except ImportError:
-    mqtt_publish = None
-
 
 UI_OPTIONS_PATH = "/data/simple_ai_vision_config.json"
 EVENT_LOG_PATH = "/data/simple_ai_vision_events.jsonl"
@@ -275,7 +270,6 @@ INDEX_HTML = r"""
       font-weight: 600;
       overflow-wrap: anywhere;
     }
-    .live-item iframe,
     .live-item img {
       display: block;
       width: 100%;
@@ -338,8 +332,7 @@ INDEX_HTML = r"""
       border-radius: 6px;
       overflow: hidden;
     }
-    .viewer-body img,
-    .viewer-body iframe {
+    .viewer-body img {
       display: block;
       width: 100%;
       height: min(68vh, 560px);
@@ -404,12 +397,10 @@ INDEX_HTML = r"""
         align-items: stretch;
         flex-direction: column;
       }
-      .viewer-body img,
-      .viewer-body iframe {
+      .viewer-body img {
         height: min(56vh, 420px);
       }
       .live-grid { grid-template-columns: 1fr; }
-      .live-item iframe,
       .live-item img { height: 220px; }
       .events-table,
       .events-table thead,
@@ -511,33 +502,6 @@ cháy"></textarea>
           <label for="telegram_timeout">Telegram Timeout</label>
           <input id="telegram_timeout" type="number" min="1" placeholder="10">
         </div>
-        <div>
-          <label for="mqtt_enabled">MQTT Publish</label>
-          <label class="monitor-toggle">
-            <input id="mqtt_enabled" type="checkbox">
-            <span>Enable MQTT events</span>
-          </label>
-        </div>
-        <div>
-          <label for="mqtt_host">MQTT Host</label>
-          <input id="mqtt_host" autocomplete="off" placeholder="core-mosquitto hoặc 192.168.1.10">
-        </div>
-        <div>
-          <label for="mqtt_port">MQTT Port</label>
-          <input id="mqtt_port" type="number" min="1" placeholder="1883">
-        </div>
-        <div>
-          <label for="mqtt_topic">MQTT Topic</label>
-          <input id="mqtt_topic" autocomplete="off" placeholder="simple_ai_vision/events">
-        </div>
-        <div>
-          <label for="mqtt_username">MQTT Username</label>
-          <input id="mqtt_username" autocomplete="off">
-        </div>
-        <div>
-          <label for="mqtt_password">MQTT Password</label>
-          <input id="mqtt_password" type="password" autocomplete="new-password">
-        </div>
       </div>
       <div class="actions">
         <button id="saveBtn" type="button">Save Configuration</button>
@@ -619,9 +583,7 @@ cháy"></textarea>
     const fields = [
       "go2rtc_url", "frigate_url", "ai_api_key", "ai_base_url", "ai_model",
       "telegram_bot_token", "telegram_chat_id", "prompt",
-      "ai_timeout", "snapshot_timeout", "telegram_timeout",
-      "mqtt_host", "mqtt_port", "mqtt_topic", "mqtt_username",
-      "mqtt_password"
+      "ai_timeout", "snapshot_timeout", "telegram_timeout"
     ];
     let cameras = [];
     let currentViewerUrl = "";
@@ -645,16 +607,6 @@ cháy"></textarea>
       });
       if (panelId === "livePanel") renderLiveCameras();
       if (panelId === "eventsPanel") loadEvents();
-    }
-
-    function buildGo2rtcUrl(camera, path, params = {}) {
-      const base = document.getElementById("go2rtc_url").value.trim().replace(/\/+$/, "");
-      const query = new URLSearchParams({src: camera, ...params});
-      return `${base}${path}?${query.toString()}`;
-    }
-
-    function hasGo2rtcUrl() {
-      return Boolean(document.getElementById("go2rtc_url").value.trim());
     }
 
     function snapshotUrl(camera) {
@@ -705,7 +657,6 @@ cháy"></textarea>
     function buildConfigPayload() {
       const payload = {};
       fields.forEach(id => payload[id] = document.getElementById(id).value);
-      payload.mqtt_enabled = document.getElementById("mqtt_enabled").checked;
       payload.keyword_match = linesToList(document.getElementById("keyword_match").value);
       payload.cameras = cameras.map(normalizeCamera).filter(camera => (
         camera.name || camera.src
@@ -805,7 +756,7 @@ cháy"></textarea>
         const video = document.createElement("button");
         video.className = "secondary";
         video.type = "button";
-        video.textContent = "Video";
+        video.textContent = "Live";
         video.addEventListener("click", () => viewVideo(cameras[index], cameraLabel(cameras[index])));
 
         const remove = document.createElement("button");
@@ -883,16 +834,6 @@ cháy"></textarea>
       const item = snapshotSourceOrError(camera);
       if (!item) return;
       currentSnapshotCamera = "";
-      if (item.src && hasGo2rtcUrl()) {
-        const url = buildGo2rtcUrl(item.src, "/stream.html", {mode: "mse"});
-        const frame = document.createElement("iframe");
-        frame.src = url;
-        frame.title = `Video ${label || item.src}`;
-        frame.allow = "autoplay; fullscreen; picture-in-picture";
-        showViewer(`Video: ${label || item.src}`, frame, url);
-        return;
-      }
-
       const img = document.createElement("img");
       img.id = "snapshotImage";
       img.dataset.src = item.src;
@@ -995,17 +936,10 @@ cháy"></textarea>
         srcLabel.textContent = camera.src;
         title.append(name, srcLabel);
 
-        let media;
-        if (hasGo2rtcUrl()) {
-          media = document.createElement("iframe");
-          media.src = buildGo2rtcUrl(camera.src, "/stream.html", {mode: "mse"});
-          media.allow = "autoplay; fullscreen; picture-in-picture";
-        } else {
-          media = document.createElement("img");
-          media.dataset.src = camera.src;
-          media.src = snapshotUrl(camera.src);
-          media.alt = `Live snapshot ${cameraLabel(camera)}`;
-        }
+        const media = document.createElement("img");
+        media.dataset.src = camera.src;
+        media.src = snapshotUrl(camera.src);
+        media.alt = `Live snapshot ${cameraLabel(camera)}`;
         media.title = `Live ${cameraLabel(camera)}`;
 
         item.append(title, media);
@@ -1076,7 +1010,6 @@ cháy"></textarea>
         }
         const config = data.config;
         fields.forEach(id => document.getElementById(id).value = config[id] ?? "");
-        document.getElementById("mqtt_enabled").checked = !!config.mqtt_enabled;
         document.getElementById("keyword_match").value = (config.keyword_match || []).join("\n");
         cameras = config.cameras || [];
         renderCameras();
@@ -1290,12 +1223,6 @@ def default_options() -> dict[str, Any]:
         "ai_timeout": 30,
         "snapshot_timeout": 10,
         "telegram_timeout": 10,
-        "mqtt_enabled": False,
-        "mqtt_host": "",
-        "mqtt_port": 1883,
-        "mqtt_username": "",
-        "mqtt_password": "",
-        "mqtt_topic": "simple_ai_vision/events",
     }
 
 
@@ -1321,7 +1248,7 @@ def load_options() -> dict[str, Any]:
 def merge_user_options(current: dict[str, Any], incoming: dict[str, Any]) -> dict[str, Any]:
     merged = dict(current)
     cleaned = dict(incoming)
-    for secret_key in ("ai_api_key", "telegram_bot_token", "mqtt_password"):
+    for secret_key in ("ai_api_key", "telegram_bot_token"):
         if secret_key in cleaned and not str(cleaned.get(secret_key, "")).strip():
             cleaned.pop(secret_key)
     merged.update(cleaned)
@@ -1361,11 +1288,6 @@ def normalize_options(options: dict[str, Any]) -> None:
         except (TypeError, ValueError):
             options[key] = 1
 
-    options["mqtt_enabled"] = bool(options.get("mqtt_enabled"))
-    try:
-        options["mqtt_port"] = int(options.get("mqtt_port", 1883))
-    except (TypeError, ValueError):
-        options["mqtt_port"] = 1883
 
 
 def normalize_camera_list(cameras: list[Any]) -> list[dict[str, str]]:
@@ -1410,15 +1332,6 @@ def validate_saved_options(options: dict[str, Any]) -> None:
             raise ValueError(f"{key} must be an integer") from exc
         if options[key] < 1:
             raise ValueError(f"{key} must be greater than 0")
-
-    if options.get("mqtt_enabled"):
-        if not str(options.get("mqtt_host", "")).strip():
-            raise ValueError("mqtt_host is required when MQTT is enabled")
-        if not str(options.get("mqtt_topic", "")).strip():
-            raise ValueError("mqtt_topic is required when MQTT is enabled")
-        if int(options.get("mqtt_port", 1883)) < 1:
-            raise ValueError("mqtt_port must be greater than 0")
-
 
 def find_saved_camera(
     options: dict[str, Any],
@@ -2038,48 +1951,6 @@ def record_event(
     os.makedirs(os.path.dirname(EVENT_LOG_PATH), exist_ok=True)
     with open(EVENT_LOG_PATH, "a", encoding="utf-8") as file:
         file.write(json.dumps(event, ensure_ascii=False) + "\n")
-    publish_mqtt_event(event)
-
-
-def publish_mqtt_event(event: dict[str, str]) -> None:
-    try:
-        options = read_options()
-    except Exception as exc:
-        logger.warning("Could not read config for MQTT publish: %s", exc)
-        return
-
-    if not options.get("mqtt_enabled"):
-        return
-
-    if mqtt_publish is None:
-        logger.error("MQTT publish requested but paho-mqtt is not installed")
-        return
-
-    host = str(options.get("mqtt_host", "")).strip()
-    topic = str(options.get("mqtt_topic", "")).strip()
-    if not host or not topic:
-        logger.error("MQTT publish skipped because mqtt_host or mqtt_topic is empty")
-        return
-
-    auth = None
-    username = str(options.get("mqtt_username", "")).strip()
-    password = str(options.get("mqtt_password", ""))
-    if username:
-        auth = {"username": username, "password": password}
-
-    try:
-        mqtt_publish.single(
-            topic,
-            payload=json.dumps(event, ensure_ascii=False),
-            hostname=host,
-            port=int(options.get("mqtt_port", 1883)),
-            auth=auth,
-            qos=0,
-            retain=False,
-        )
-        logger.info("MQTT event published topic=%s status=%s", topic, event.get("status"))
-    except Exception as exc:
-        logger.error("MQTT publish failed: %s", exc)
 
 
 def read_events(limit: int = 100) -> list[dict[str, str]]:
@@ -2306,6 +2177,16 @@ async def analyze(request: Request) -> JSONResponse:
             options,
             camera_value or None,
         )
+        if options.get("cameras") and not saved_camera:
+            logger.info("Skipping unknown camera=%s", camera_value)
+            return JSONResponse(
+                {
+                    "success": True,
+                    "skipped": True,
+                    "reason": "camera not configured",
+                    "camera": camera_value,
+                }
+            )
         if saved_camera and saved_camera.get("enabled") is False:
             camera_name = saved_camera.get("src") or "camera"
             logger.info("Skipping disabled camera=%s", camera_name)
