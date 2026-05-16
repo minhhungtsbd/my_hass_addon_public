@@ -34,6 +34,7 @@ templates = Jinja2Templates(directory=str(ROOT / "templates"))
 async def lifespan(app: FastAPI):
     # Startup
     db.init_db()
+    db.delete_old_events(7)        # clean up old events/images at startup
     config.migrate_config_json()   # one-time: config.json → DB
     current_config = config.read_config()
     

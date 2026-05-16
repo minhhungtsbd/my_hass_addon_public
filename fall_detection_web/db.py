@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
+import random
 import shutil
 import sqlite3
 import time
@@ -158,6 +159,10 @@ def save_event_image(source_path: Path | None, status_name: str) -> str:
     if not source_path or not source_path.exists():
         return ""
     cleanup_event_images()
+    # Thỉnh thoảng dọn dẹp các event quá 7 ngày
+    if random.random() < 0.05:
+        delete_old_events(7)
+        
     stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%f")
     safe_status = "".join(ch for ch in status_name if ch.isalnum() or ch in ("_", "-")) or "event"
     target = EVENT_IMAGES_DIR / f"{stamp}_{safe_status}.jpg"
@@ -169,6 +174,17 @@ def _prune_events(conn: sqlite3.Connection) -> None:
     count = conn.execute("SELECT COUNT(*) FROM events").fetchone()[0]
     if count > MAX_EVENTS:
         to_delete = count - MAX_EVENTS + PRUNE_BATCH
+        rows = conn.execute(
+            "SELECT image_file FROM events ORDER BY id ASC LIMIT ?",
+            (to_delete,),
+        ).fetchall()
+        for row in rows:
+            img = str(row[0] or "").strip()
+            if img:
+                try:
+                    (EVENT_IMAGES_DIR / img).unlink()
+                except OSError:
+                    pass
         conn.execute(
             "DELETE FROM events WHERE id IN (SELECT id FROM events ORDER BY id ASC LIMIT ?)",
             (to_delete,),
@@ -225,16 +241,29 @@ def count_events() -> int:
 def clear_events() -> int:
     with get_conn() as conn:
         deleted = conn.execute("DELETE FROM events").rowcount
-    # Also clean orphan images
-    cleanup_event_images()
+    # Delete all image files
+    for path in EVENT_IMAGES_DIR.glob("*.jpg"):
+        try:
+            path.unlink()
+        except OSError:
+            pass
     return deleted
 
 
 def delete_old_events(days: int = 7) -> int:
     cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat(timespec="seconds")
     with get_conn() as conn:
+        rows = conn.execute("SELECT image_file FROM events WHERE time < ?", (cutoff,)).fetchall()
+        for row in rows:
+            img = str(row[0] or "").strip()
+            if img:
+                try:
+                    (EVENT_IMAGES_DIR / img).unlink()
+                except OSError:
+                    pass
         deleted = conn.execute("DELETE FROM events WHERE time < ?", (cutoff,)).rowcount
-    cleanup_event_images()
+    if deleted > 0:
+        logger.info("[DB] Deleted %d events older than %d days", deleted, days)
     return deleted
 
 
