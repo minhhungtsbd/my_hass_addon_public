@@ -1727,6 +1727,39 @@ def resolve_go2rtc_url(options: dict[str, Any]) -> str:
     raise ValueError("go2rtc_url is required")
 
 
+def resolve_frigate_api_url(options: dict[str, Any]) -> str:
+    timeout = max(1, min(int(options.get("snapshot_timeout", 10)), 5))
+    for candidate in frigate_api_candidates(options):
+        try:
+            request_frigate_config_streams(candidate, timeout)
+            logger.info("Using Frigate API URL=%s", candidate)
+            return candidate
+        except (ValueError, requests.RequestException) as exc:
+            logger.info("Frigate API snapshot candidate failed url=%s error=%s", candidate, exc)
+
+    raise ValueError("frigate_url is required when go2rtc is unavailable")
+
+
+def write_snapshot_file(camera: str, content: bytes) -> str:
+    tmp = tempfile.NamedTemporaryFile(
+        mode="wb",
+        suffix=".jpg",
+        prefix=f"simple_ai_vision_{camera}_",
+        dir="/tmp",
+        delete=False,
+    )
+    with tmp:
+        tmp.write(content)
+
+    return tmp.name
+
+
+def validate_image_response(response: requests.Response, error: str) -> None:
+    content_type = response.headers.get("content-type", "")
+    if "image" not in content_type and not response.content.startswith(b"\xff\xd8"):
+        raise ValueError(error)
+
+
 def fetch_snapshot(camera: str, options: dict[str, Any]) -> str:
     logger.info("Fetching snapshot for camera=%s", camera)
     base_url = resolve_go2rtc_url(options)
@@ -1738,22 +1771,32 @@ def fetch_snapshot(camera: str, options: dict[str, Any]) -> str:
         timeout=options["snapshot_timeout"],
     )
     response.raise_for_status()
+    validate_image_response(response, "snapshot response is not a JPEG image")
 
-    content_type = response.headers.get("content-type", "")
-    if "image" not in content_type and not response.content.startswith(b"\xff\xd8"):
-        raise ValueError("snapshot response is not a JPEG image")
+    return write_snapshot_file(camera, response.content)
 
-    tmp = tempfile.NamedTemporaryFile(
-        mode="wb",
-        suffix=".jpg",
-        prefix=f"simple_ai_vision_{camera}_",
-        dir="/tmp",
-        delete=False,
+
+def fetch_frigate_snapshot(camera: str, options: dict[str, Any]) -> str:
+    logger.info("Fetching Frigate latest frame for camera=%s", camera)
+    base_url = resolve_frigate_api_url(options)
+    response = requests.get(
+        f"{base_url}/api/{camera}/latest.jpg",
+        timeout=options["snapshot_timeout"],
     )
-    with tmp:
-        tmp.write(response.content)
+    response.raise_for_status()
+    validate_image_response(response, "Frigate latest frame response is not an image")
 
-    return tmp.name
+    return write_snapshot_file(camera, response.content)
+
+
+def fetch_snapshot_with_fallback(camera: str, options: dict[str, Any]) -> str:
+    try:
+        return fetch_snapshot(camera, options)
+    except (ValueError, requests.RequestException) as exc:
+        if not frigate_api_candidates(options):
+            raise
+        logger.info("go2rtc snapshot failed, trying Frigate latest frame camera=%s error=%s", camera, exc)
+        return fetch_frigate_snapshot(camera, options)
 
 
 def fetch_hass_snapshot(entity_id: str, options: dict[str, Any]) -> str:
@@ -1794,7 +1837,7 @@ def fetch_snapshot_for_source(
 ) -> tuple[str, str]:
     if camera:
         camera_name = validate_camera(camera)
-        return fetch_snapshot(camera_name, options), camera_name
+        return fetch_snapshot_with_fallback(camera_name, options), camera_name
 
     if entity_id:
         entity = validate_entity_id(entity_id)

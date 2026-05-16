@@ -389,10 +389,40 @@ Use the optional `frigate_url` setting when auto-discovery cannot find the Friga
 http://ccab4aaf-frigate:5000
 ```
 
-Snapshot analysis still uses go2rtc:
+Snapshot analysis prefers go2rtc:
 
 ```text
 {go2rtc_url}/api/frame.jpeg?src=<camera>
 ```
 
-If Frigate cameras load but snapshots fail, expose/enable the Frigate go2rtc API port `1984` or enter a reachable go2rtc URL manually.
+If Frigate's go2rtc API port `1984` is not reachable, Simple AI Vision falls back to the Frigate API latest frame endpoint:
+
+```text
+{frigate_url}/api/<camera>/latest.jpg
+```
+
+For the Home Assistant Frigate add-on, use:
+
+```text
+frigate_url = http://ccab4aaf-frigate:5000
+```
+
+The Frigate `8555` port is WebRTC and is not used for snapshot analysis.
+
+To trigger analysis from Frigate person detection, enable MQTT in Frigate and use a Home Assistant automation on `frigate/events`:
+
+```yaml
+trigger:
+  - platform: mqtt
+    topic: frigate/events
+condition:
+  - condition: template
+    value_template: >
+      {{ trigger.payload_json["after"]["camera"] == "bep"
+         and trigger.payload_json["after"]["label"] == "person"
+         and trigger.payload_json["type"] in ["new", "update"] }}
+action:
+  - service: rest_command.simple_ai_vision_analyze
+    data:
+      payload: '{"camera":"bep"}'
+```
