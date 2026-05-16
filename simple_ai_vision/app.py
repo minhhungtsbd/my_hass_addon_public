@@ -159,7 +159,7 @@ INDEX_HTML = r"""
     }
     .camera-head,
     .camera-row {
-      --camera-grid: 42px minmax(140px, 1fr) minmax(140px, 1fr) max-content;
+      --camera-grid: 42px minmax(120px, .9fr) minmax(130px, .9fr) minmax(160px, 1fr) max-content;
       display: grid;
       grid-template-columns: var(--camera-grid);
       gap: 6px;
@@ -173,6 +173,12 @@ INDEX_HTML = r"""
     }
     .camera-row {
       margin-bottom: 8px;
+    }
+    .prompt-row {
+      border-top: 1px solid var(--line);
+      display: grid;
+      gap: 8px;
+      padding: 12px 0;
     }
     .camera-head > div,
     .camera-row > div,
@@ -435,6 +441,7 @@ INDEX_HTML = r"""
 
     <nav class="tabs" aria-label="Main views">
       <button class="tab-btn active" data-tab="camerasPanel" type="button">Cameras</button>
+      <button class="tab-btn" data-tab="promptsPanel" type="button">Prompt Profiles</button>
       <button class="tab-btn" data-tab="livePanel" type="button">Live</button>
       <button class="tab-btn" data-tab="eventsPanel" type="button">Sự kiện</button>
       <button class="tab-btn" data-tab="settingsPanel" type="button">Core Settings</button>
@@ -474,7 +481,7 @@ INDEX_HTML = r"""
           <input id="telegram_bot_token" type="password" autocomplete="new-password" placeholder="123456789:ABCDEF...">
         </div>
         <div class="full">
-          <label for="prompt">Prompt</label>
+          <label for="prompt">Default Prompt</label>
           <textarea id="prompt" placeholder="Bạn đang phân tích ảnh camera an ninh.
 Chỉ mô tả các sự kiện quan trọng liên quan đến an ninh.
 Nếu không có gì quan trọng hãy trả lời NORMAL."></textarea>
@@ -526,6 +533,7 @@ cháy"></textarea>
         <div>Monitor</div>
         <div>Name</div>
         <div>go2rtc src</div>
+        <div>Prompt</div>
         <div>Actions</div>
       </div>
       <div id="cameraList"></div>
@@ -533,6 +541,17 @@ cháy"></textarea>
         <button class="secondary" id="addCameraBtn" type="button">Add Camera</button>
         <button class="secondary" id="saveCamerasBtn" type="button">Save Cameras</button>
         <span id="cameraStatus" class="status"></span>
+      </div>
+    </section>
+
+    <section class="panel tab-panel" id="promptsPanel">
+      <h2>Prompt Profiles</h2>
+      <div class="hint">Tao prompt theo nhom moi truong, vi du Cong, Bep, Thu cung. Moi camera co the chon mot prompt profile rieng.</div>
+      <div id="promptProfileList"></div>
+      <div class="actions">
+        <button class="secondary" id="addPromptProfileBtn" type="button">Add Prompt</button>
+        <button class="secondary" id="savePromptProfilesBtn" type="button">Save Prompts</button>
+        <span id="promptStatus" class="status"></span>
       </div>
     </section>
 
@@ -586,6 +605,7 @@ cháy"></textarea>
       "ai_timeout", "snapshot_timeout", "telegram_timeout"
     ];
     let cameras = [];
+    let promptProfiles = [];
     let currentViewerUrl = "";
     let currentSnapshotCamera = "";
     let liveRefreshTimer = null;
@@ -661,17 +681,28 @@ cháy"></textarea>
       payload.cameras = cameras.map(normalizeCamera).filter(camera => (
         camera.name || camera.src
       ));
+      payload.prompt_profiles = promptProfiles.map(normalizePromptProfile).filter(profile => (
+        profile.title || profile.prompt
+      ));
       return payload;
+    }
+
+    function normalizePromptProfile(profile) {
+      return {
+        title: String(profile?.title || "").trim(),
+        prompt: String(profile?.prompt || "").trim()
+      };
     }
 
     function normalizeCamera(camera) {
       if (typeof camera === "string") {
-        return {enabled: true, name: "", src: camera.trim()};
+        return {enabled: true, name: "", src: camera.trim(), prompt_profile: ""};
       }
       return {
         enabled: camera?.enabled !== false,
         name: String(camera?.name || "").trim(),
-        src: String(camera?.src || "").trim()
+        src: String(camera?.src || "").trim(),
+        prompt_profile: String(camera?.prompt_profile || "").trim()
       };
     }
 
@@ -741,6 +772,25 @@ cháy"></textarea>
         srcInput.addEventListener("input", () => cameras[index].src = srcInput.value);
         srcWrap.append(srcLabel, srcInput);
 
+        const promptWrap = document.createElement("div");
+        const promptLabel = document.createElement("div");
+        promptLabel.className = "mobile-label";
+        promptLabel.textContent = "Prompt";
+        const promptSelect = document.createElement("select");
+        const defaultOption = document.createElement("option");
+        defaultOption.value = "";
+        defaultOption.textContent = "Default Prompt";
+        promptSelect.append(defaultOption);
+        promptProfiles.map(normalizePromptProfile).filter(profile => profile.title).forEach(profile => {
+          const option = document.createElement("option");
+          option.value = profile.title;
+          option.textContent = profile.title;
+          promptSelect.append(option);
+        });
+        promptSelect.value = item.prompt_profile;
+        promptSelect.addEventListener("change", () => cameras[index].prompt_profile = promptSelect.value);
+        promptWrap.append(promptLabel, promptSelect);
+
         const test = document.createElement("button");
         test.className = "secondary";
         test.type = "button";
@@ -777,7 +827,7 @@ cháy"></textarea>
         actionsList.append(snapshot, video, test, remove);
         actions.append(actionsSummary, actionsList);
 
-        row.append(monitorWrap, nameWrap, srcWrap, actions);
+        row.append(monitorWrap, nameWrap, srcWrap, promptWrap, actions);
         list.append(row);
       });
       renderLiveCameras();
@@ -905,9 +955,62 @@ cháy"></textarea>
         setStatus("streamStatus", "Select a go2rtc stream first, or use Add Camera for manual input.", "err");
         return;
       }
-      cameras.push({enabled: true, name: src, src});
+      cameras.push({enabled: true, name: src, src, prompt_profile: ""});
       renderCameras();
       setStatus("streamStatus", `Added go2rtc stream ${src}`, "ok");
+    }
+
+    function renderPromptProfiles() {
+      const list = document.getElementById("promptProfileList");
+      if (!list) return;
+      list.innerHTML = "";
+      promptProfiles = promptProfiles.map(normalizePromptProfile);
+      if (!promptProfiles.length) {
+        const empty = document.createElement("div");
+        empty.className = "hint";
+        empty.textContent = "No prompt profiles yet.";
+        list.append(empty);
+      }
+
+      promptProfiles.forEach((profile, index) => {
+        const row = document.createElement("div");
+        row.className = "prompt-row";
+
+        const title = document.createElement("input");
+        title.value = profile.title;
+        title.placeholder = "Title, e.g. Gate";
+        title.addEventListener("input", () => {
+          promptProfiles[index].title = title.value;
+          renderCameras();
+        });
+
+        const prompt = document.createElement("textarea");
+        prompt.value = profile.prompt;
+        prompt.placeholder = "Prompt for this camera group";
+        prompt.addEventListener("input", () => promptProfiles[index].prompt = prompt.value);
+
+        const remove = document.createElement("button");
+        remove.className = "danger";
+        remove.type = "button";
+        remove.textContent = "Remove";
+        remove.addEventListener("click", () => {
+          const removedTitle = promptProfiles[index].title;
+          promptProfiles.splice(index, 1);
+          cameras = cameras.map(camera => {
+            const item = normalizeCamera(camera);
+            if (item.prompt_profile === removedTitle) item.prompt_profile = "";
+            return item;
+          });
+          renderPromptProfiles();
+          renderCameras();
+        });
+
+        const actions = document.createElement("div");
+        actions.className = "actions";
+        actions.append(remove);
+        row.append(title, prompt, actions);
+        list.append(row);
+      });
     }
 
     function renderLiveCameras() {
@@ -1012,6 +1115,8 @@ cháy"></textarea>
         fields.forEach(id => document.getElementById(id).value = config[id] ?? "");
         document.getElementById("keyword_match").value = (config.keyword_match || []).join("\n");
         cameras = config.cameras || [];
+        promptProfiles = config.prompt_profiles || [];
+        renderPromptProfiles();
         renderCameras();
         setStatus("configStatus", "Loaded", "ok");
       } catch (err) {
@@ -1041,6 +1146,8 @@ cháy"></textarea>
           return null;
         }
         cameras = data.config.cameras || [];
+        promptProfiles = data.config.prompt_profiles || [];
+        renderPromptProfiles();
         renderCameras();
         setStatus(statusId, "Saved", "ok");
         return data.config;
@@ -1125,13 +1232,18 @@ cháy"></textarea>
     document.getElementById("testAiBtn").addEventListener("click", testAiApi);
     document.getElementById("testTelegramBtn").addEventListener("click", testTelegram);
     document.getElementById("saveCamerasBtn").addEventListener("click", () => saveConfig("cameraStatus"));
+    document.getElementById("savePromptProfilesBtn").addEventListener("click", () => saveConfig("promptStatus"));
+    document.getElementById("addPromptProfileBtn").addEventListener("click", () => {
+      promptProfiles.push({title: "", prompt: ""});
+      renderPromptProfiles();
+    });
     document.getElementById("loadStreamsBtn").addEventListener("click", loadGo2rtcStreams);
     document.getElementById("addStreamBtn").addEventListener("click", addSelectedStream);
     document.getElementById("refreshLiveBtn").addEventListener("click", renderLiveCameras);
     document.getElementById("liveLimit").addEventListener("input", renderLiveCameras);
     document.getElementById("refreshEventsBtn").addEventListener("click", loadEvents);
     document.getElementById("addCameraBtn").addEventListener("click", () => {
-      cameras.push({enabled: true, name: "", src: ""});
+      cameras.push({enabled: true, name: "", src: "", prompt_profile: ""});
       renderCameras();
     });
     document.getElementById("closeViewerBtn").addEventListener("click", () => {
@@ -1218,6 +1330,7 @@ def default_options() -> dict[str, Any]:
         "telegram_bot_token": "",
         "telegram_chat_id": "",
         "prompt": DEFAULT_PROMPT,
+        "prompt_profiles": [],
         "keyword_match": DEFAULT_KEYWORDS,
         "cameras": [],
         "ai_timeout": 30,
@@ -1282,6 +1395,10 @@ def normalize_options(options: dict[str, Any]) -> None:
         options["cameras"] = []
     options["cameras"] = normalize_camera_list(options.get("cameras", []))
 
+    if not isinstance(options.get("prompt_profiles"), list):
+        options["prompt_profiles"] = []
+    options["prompt_profiles"] = normalize_prompt_profiles(options.get("prompt_profiles", []))
+
     for key in ("ai_timeout", "snapshot_timeout", "telegram_timeout"):
         try:
             options[key] = int(options.get(key, 1))
@@ -1294,12 +1411,13 @@ def normalize_camera_list(cameras: list[Any]) -> list[dict[str, str]]:
     normalized = []
     for camera in cameras:
         if isinstance(camera, str):
-            item = {"enabled": True, "name": "", "src": camera.strip()}
+            item = {"enabled": True, "name": "", "src": camera.strip(), "prompt_profile": ""}
         elif isinstance(camera, dict):
             item = {
                 "enabled": camera.get("enabled") is not False,
                 "name": str(camera.get("name", "")).strip(),
                 "src": str(camera.get("src", "")).strip(),
+                "prompt_profile": str(camera.get("prompt_profile", "")).strip(),
             }
         else:
             continue
@@ -1310,12 +1428,44 @@ def normalize_camera_list(cameras: list[Any]) -> list[dict[str, str]]:
     return normalized
 
 
+def normalize_prompt_profiles(profiles: list[Any]) -> list[dict[str, str]]:
+    normalized = []
+    for profile in profiles:
+        if not isinstance(profile, dict):
+            continue
+        item = {
+            "title": str(profile.get("title", "")).strip(),
+            "prompt": str(profile.get("prompt", "")).strip(),
+        }
+        if item["title"] or item["prompt"]:
+            normalized.append(item)
+    return normalized
+
+
 def validate_saved_options(options: dict[str, Any]) -> None:
     if not isinstance(options.get("keyword_match"), list):
         raise ValueError("keyword_match must be a list")
 
     if not isinstance(options.get("cameras"), list):
         raise ValueError("cameras must be a list")
+
+    if not isinstance(options.get("prompt_profiles"), list):
+        raise ValueError("prompt_profiles must be a list")
+
+    prompt_titles = set()
+    for profile in options["prompt_profiles"]:
+        if not isinstance(profile, dict):
+            raise ValueError("prompt profile entries must be objects")
+        title = str(profile.get("title", "")).strip()
+        prompt = str(profile.get("prompt", "")).strip()
+        if prompt and not title:
+            raise ValueError("prompt profile title is required")
+        if title and not prompt:
+            raise ValueError("prompt profile prompt is required")
+        if title in prompt_titles:
+            raise ValueError(f"duplicate prompt profile: {title}")
+        if title:
+            prompt_titles.add(title)
 
     for camera in options["cameras"]:
         if not isinstance(camera, dict):
@@ -1324,6 +1474,8 @@ def validate_saved_options(options: dict[str, Any]) -> None:
             validate_camera(camera["src"])
         elif camera.get("name"):
             raise ValueError("go2rtc src is required for each camera")
+        if camera.get("prompt_profile") and camera["prompt_profile"] not in prompt_titles:
+            raise ValueError(f"unknown prompt profile: {camera['prompt_profile']}")
 
     for key in ("ai_timeout", "snapshot_timeout", "telegram_timeout"):
         try:
@@ -1343,6 +1495,19 @@ def find_saved_camera(
         if camera and item.get("src") == camera:
             return item
     return None
+
+
+def prompt_for_camera(camera: dict[str, str] | None, options: dict[str, Any]) -> str:
+    profile_title = str((camera or {}).get("prompt_profile", "")).strip()
+    if profile_title:
+        for profile in options.get("prompt_profiles", []):
+            if not isinstance(profile, dict):
+                continue
+            if str(profile.get("title", "")).strip() == profile_title:
+                prompt = str(profile.get("prompt", "")).strip()
+                if prompt:
+                    return prompt
+    return str(options.get("prompt", DEFAULT_PROMPT)).strip() or DEFAULT_PROMPT
 
 
 def validate_options(options: dict[str, Any]) -> None:
@@ -2202,6 +2367,7 @@ async def analyze(request: Request) -> JSONResponse:
         snapshot_path, camera = fetch_camera_snapshot(camera_value, options)
         event_camera = camera
         data_url = image_to_data_url(snapshot_path)
+        options["prompt"] = prompt_for_camera(saved_camera, options)
         analysis = call_ai(data_url, options)
         keyword = matched_keyword(analysis, options["keyword_match"])
         matched = bool(keyword)

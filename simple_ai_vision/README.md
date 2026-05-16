@@ -61,7 +61,7 @@ Các trường chính:
 | `ai_model` | Model vision cần dùng |
 | `telegram_bot_token` | Telegram bot token |
 | `telegram_chat_id` | Chat ID nhận cảnh báo |
-| `prompt` | Prompt gửi cho AI |
+| `prompt` | Prompt mặc định gửi cho AI nếu camera không chọn Prompt Profile |
 | `keyword_match` | Mỗi dòng là keyword hoặc regex |
 | `ai_timeout` | Thời gian chờ AI API, giây |
 | `snapshot_timeout` | Thời gian chờ snapshot, giây |
@@ -104,6 +104,7 @@ Mỗi camera có các trường:
 | `Monitor` | Bật/tắt theo dõi. Nếu tắt, `/analyze` sẽ trả `skipped: true` và không gọi AI |
 | `Name` | Tên hiển thị |
 | `go2rtc src` | Tên stream go2rtc, ví dụ `bep` |
+| `Prompt` | Prompt Profile riêng cho camera; để trống thì dùng Default Prompt |
 
 Nút trong tab Cameras:
 
@@ -115,6 +116,12 @@ Nút trong tab Cameras:
 - `Save Cameras`: lưu camera.
 
 Camera cấu hình bằng `go2rtc src`. Với Frigate fallback, `go2rtc src` chính là tên camera/stream trong Frigate, ví dụ `bep`.
+
+## Prompt Profiles
+
+Tab **Prompt Profiles** cho phép lưu nhiều prompt có tiêu đề, ví dụ `Cong`, `Bep`, `Thu cung`.
+
+Khi thêm camera, chọn tiêu đề prompt tương ứng trong cột `Prompt`. Nhiều camera có thể dùng chung một Prompt Profile. Nếu camera không chọn profile, add-on dùng `Default Prompt` trong Core Settings.
 
 ## Home Assistant Automation
 
