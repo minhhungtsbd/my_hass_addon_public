@@ -152,21 +152,22 @@ INDEX_HTML = r"""
     }
     .profile-list {
       display: grid;
-      gap: 10px;
       margin-top: 14px;
     }
+    .profile-head,
     .profile-item {
-      border: 1px solid var(--line);
-      border-radius: 8px;
+      align-items: start;
+      border-bottom: 1px solid var(--line);
       display: grid;
-      gap: 8px;
-      padding: 12px;
+      gap: 12px;
+      grid-template-columns: minmax(120px, .45fr) minmax(220px, 1fr) max-content;
+      padding: 10px 0;
     }
-    .profile-item-head {
-      align-items: center;
-      display: flex;
-      gap: 10px;
-      justify-content: space-between;
+    .profile-head {
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 700;
+      padding-top: 0;
     }
     .profile-item-title {
       font-weight: 750;
@@ -394,6 +395,8 @@ INDEX_HTML = r"""
         margin-top: 8px;
       }
       .camera-head { display: none; }
+      .profile-head { display: none; }
+      .profile-item { grid-template-columns: 1fr; }
       .mobile-label { display: block; }
       .viewer {
         width: calc(100vw - 12px);
@@ -995,17 +998,25 @@ cháy"></textarea>
         empty.className = "hint";
         empty.textContent = "No prompt profiles yet.";
         list.append(empty);
+        return;
       }
+
+      const header = document.createElement("div");
+      header.className = "profile-head";
+      header.innerHTML = "<div>Title</div><div>Prompt</div><div>Actions</div>";
+      list.append(header);
 
       promptProfiles.forEach((profile, index) => {
         const row = document.createElement("div");
         row.className = "profile-item";
 
-        const head = document.createElement("div");
-        head.className = "profile-item-head";
         const title = document.createElement("div");
         title.className = "profile-item-title";
         title.textContent = profile.title || "Untitled";
+
+        const preview = document.createElement("pre");
+        preview.className = "profile-preview";
+        preview.textContent = profile.prompt || "No prompt text.";
 
         const actions = document.createElement("div");
         actions.className = "actions";
@@ -1030,13 +1041,8 @@ cháy"></textarea>
           renderCameras();
         });
         actions.append(edit, remove);
-        head.append(title, actions);
 
-        const preview = document.createElement("pre");
-        preview.className = "profile-preview";
-        preview.textContent = profile.prompt || "No prompt text.";
-
-        row.append(head, preview);
+        row.append(title, preview, actions);
         list.append(row);
       });
     }
