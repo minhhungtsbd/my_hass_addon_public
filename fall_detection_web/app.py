@@ -134,7 +134,11 @@ async def event_image(filename: str, _: str = Depends(auth.require_auth)):
     path = db.EVENT_IMAGES_DIR / safe_name
     if not path.exists() or not path.is_file():
         raise HTTPException(status_code=404, detail="Image not found")
-    return FileResponse(path, media_type="image/jpeg")
+    return FileResponse(
+        path,
+        media_type="image/jpeg",
+        headers={"Cache-Control": "private, no-store"},
+    )
 
 
 # ──────────────────────────────────────────────
