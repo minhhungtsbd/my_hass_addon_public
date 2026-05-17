@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import logging
-import shutil
 import threading
 import time
 from pathlib import Path
@@ -13,7 +12,7 @@ import requests
 
 from ai import send_telegram, verify_scene
 from config import get_camera, normalize_cameras, require_config
-from db import insert_event, now_iso, local_iso
+from db import insert_event, now_iso
 
 logger = logging.getLogger("fall_detection_web")
 
@@ -366,10 +365,13 @@ def start_monitor(config: dict[str, Any]) -> str:
 
 
 def stop_monitor(wait: bool = False) -> None:
+    global worker_thread
     stop_event.set()
     thread = worker_thread
     if wait and thread and thread.is_alive():
         thread.join(timeout=8)
+    if thread and not thread.is_alive():
+        worker_thread = None
 
 
 def restart_monitor(config: dict[str, Any]) -> None:
@@ -379,10 +381,14 @@ def restart_monitor(config: dict[str, Any]) -> None:
             return
         stop_event.set()
         thread.join(timeout=8)
+        if thread.is_alive():
+            message = "Previous monitor did not stop within 8 seconds"
+            set_state(last_error=message)
+            insert_event("restart_error", error=message)
+            raise RuntimeError(message)
         stop_event.clear()
         new_thread = threading.Thread(target=_monitor_loop, args=(config,), daemon=True)
         globals()["worker_thread"] = new_thread
         new_thread.start()
         insert_event("config_applied", message="Monitor restarted with new settings")
-
 

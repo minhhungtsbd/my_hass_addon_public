@@ -59,7 +59,6 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "alert_cooldown": 300,
     "frame_skip": 2,
     "loop_sleep": 0.3,
-    "webhook_token": "",
     "jwt_secret": "",
 }
 
@@ -79,7 +78,6 @@ ENV_CONFIG_KEYS: dict[str, str] = {
     "ALERT_COOLDOWN": "alert_cooldown",
     "FRAME_SKIP": "frame_skip",
     "LOOP_SLEEP": "loop_sleep",
-    "WEBHOOK_TOKEN": "webhook_token",
     "JWT_SECRET": "jwt_secret",
 }
 

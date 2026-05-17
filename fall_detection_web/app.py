@@ -4,15 +4,13 @@ from __future__ import annotations
 
 import logging
 import secrets
-import shutil
 import psutil
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any
 
 from fastapi import Body, Depends, FastAPI, Form, HTTPException, Request, Response, status
-from fastapi.responses import HTMLResponse, RedirectResponse
-from fastapi.staticfiles import StaticFiles
+from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 
 import ai
@@ -70,10 +68,8 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="Fall Detection Web", lifespan=lifespan)
 
-# Mount static files
 DATA_DIR.mkdir(parents=True, exist_ok=True)
 db.EVENT_IMAGES_DIR.mkdir(parents=True, exist_ok=True)
-app.mount("/api/event-image", StaticFiles(directory=str(db.EVENT_IMAGES_DIR)), name="event-image")
 
 @app.get("/favicon.ico")
 async def favicon():
@@ -128,6 +124,17 @@ async def logout():
 @app.get("/", response_class=HTMLResponse)
 async def index_page(request: Request, _: str = Depends(auth.require_auth)):
     return templates.TemplateResponse("index.html", {"request": request})
+
+
+@app.get("/api/event-image/{filename}")
+async def event_image(filename: str, _: str = Depends(auth.require_auth)):
+    safe_name = Path(filename).name
+    if safe_name != filename or not safe_name.lower().endswith(".jpg"):
+        raise HTTPException(status_code=404, detail="Image not found")
+    path = db.EVENT_IMAGES_DIR / safe_name
+    if not path.exists() or not path.is_file():
+        raise HTTPException(status_code=404, detail="Image not found")
+    return FileResponse(path, media_type="image/jpeg")
 
 
 # ──────────────────────────────────────────────

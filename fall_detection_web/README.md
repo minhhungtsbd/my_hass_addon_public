@@ -4,15 +4,14 @@ Web UI giám sát té ngã chạy trên VPS/server:
 
 ```text
 Camera (RTSP)
-  → go2rtc (stream & JPEG snapshot)
-  → YOLO detect person (local, trên Python app)
+  → YOLO local detect person (ultralytics, trong Python app)
   → AI vision verify (cloud API)
   → Telegram alert nếu EMERGENCY
 ```
 
 ## Tính Năng
 
-- **YOLO prefilter** — dùng `ultralytics` + `opencv-python` để detect `person` từ RTSP stream. Khi phát hiện, gọi AI cloud để xác minh té ngã.
+- **YOLO local detection only** — dùng `ultralytics` + `opencv-python` để detect `person` từ RTSP stream. Khi phát hiện, gọi AI cloud để xác minh té ngã. Không còn detection mode khác.
 - **AI Verify** — gửi ảnh lên OpenAI-compatible vision API, parse response `SAFE / EMERGENCY`.
 - **Telegram Alert** — gửi ảnh kèm caption khi AI kết luận EMERGENCY, có cooldown để tránh spam.
 - **Multi-camera** — cấu hình nhiều camera, bật/tắt từng camera qua UI.
@@ -90,7 +89,6 @@ cp .env.example .env
 | `ALERT_COOLDOWN` | `alert_cooldown` | Giây tối thiểu giữa 2 cảnh báo Telegram |
 | `FRAME_SKIP` | `frame_skip` | Bỏ N-1 frame để giảm CPU |
 | `LOOP_SLEEP` | `loop_sleep` | Thời gian nghỉ mỗi vòng lặp (giây) |
-| `WEBHOOK_TOKEN` | `webhook_token` | Token bảo vệ API (tùy chọn) |
 
 > **Priority:** `.env` / os.environ > SQLite settings > default values
 
@@ -154,7 +152,7 @@ POST /api/test-ai-camera?index=  # Test AI với snapshot camera cụ thể
 POST /api/test-telegram          # Test gửi Telegram
 POST /api/test-ai-upload         # Test AI với ảnh upload (max 10MB)
 
-GET  /api/event-image/{filename} # Ảnh event (static)
+GET  /api/event-image/{filename} # Ảnh event (yêu cầu đăng nhập)
 ```
 
 ## Nhiều Camera
@@ -169,10 +167,12 @@ Camera được cấu hình trong tab **Cameras**. Mỗi camera gồm:
 | go2rtc src | Tên stream trong go2rtc (cho snapshot JPEG và live view) |
 | Live URL | (Tùy chọn) URL stream trực tiếp thay vì tự build từ go2rtc_src |
 
-Thứ tự ưu tiên lấy **snapshot**:
+Thứ tự ưu tiên lấy **snapshot thủ công / test AI**:
 
 1. go2rtc JPEG API: `{go2rtc_url}/api/frame.jpeg?src={go2rtc_src}`
 2. Fallback RTSP OpenCV
+
+Monitor chạy nền vẫn dùng RTSP frame để YOLO local detect `person`. go2rtc chỉ dùng cho snapshot thủ công/test và live view khi có cấu hình.
 
 Thứ tự ưu tiên **live view**:
 

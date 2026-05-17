@@ -497,6 +497,10 @@
             <input id="ai_base_url" autocomplete="off" placeholder="https://9router.minhhungtsbd.me/v1">
           </div>
           <div>
+            <label for="go2rtc_url">go2rtc Base URL</label>
+            <input id="go2rtc_url" autocomplete="off" placeholder="http://127.0.0.1:1984">
+          </div>
+          <div>
             <label for="vision_model">Vision Model</label>
             <input id="vision_model" placeholder="gpt-4o">
           </div>
@@ -537,10 +541,6 @@
           <div>
             <label for="telegram_chat_id">Telegram Chat ID</label>
             <input id="telegram_chat_id" autocomplete="off">
-          </div>
-          <div>
-            <label for="webhook_token">Webhook Token (Bảo vệ API)</label>
-            <input id="webhook_token" type="password" autocomplete="new-password">
           </div>
           <div>
             <label for="verify_interval">Verify Interval (seconds)</label>
@@ -712,8 +712,8 @@
     let eventsTotalPages = 1;
     const numericIds = ["confidence", "verify_interval", "alert_cooldown", "frame_skip", "loop_sleep", "yolo_imgsz"];
     const configIds = [
-      "ai_base_url", "ai_api_key", "vision_model", "fallback_vision_model", "verify_prompt", "detection_mode", "yolo_model",
-      "telegram_bot_token", "telegram_chat_id", "webhook_token", ...numericIds
+      "ai_base_url", "go2rtc_url", "ai_api_key", "vision_model", "fallback_vision_model", "verify_prompt", "detection_mode", "yolo_model",
+      "telegram_bot_token", "telegram_chat_id", ...numericIds
     ];
 
     function setText(id, value) {
@@ -733,9 +733,14 @@
             window.location.href = '/login';
             return;
         }
-        const data = await response.json();
+        let data = {};
+        try {
+          data = await response.json();
+        } catch (err) {
+          data = {};
+        }
         if (!response.ok || data.success === false) {
-          throw new Error(data.error || `HTTP ${response.status}`);
+          throw new Error(data.detail || data.error || data.message || `HTTP ${response.status}`);
         }
         return data;
       } finally {
@@ -876,7 +881,7 @@
     function renderDashboard() {
       const enabled = cameras.map(normalizeCamera).filter(camera => camera.enabled);
       setText("enabledCameraCount", enabled.length);
-      setText("dashboardGo2rtc", "-");
+      setText("dashboardGo2rtc", document.getElementById("go2rtc_url").value.trim() || "-");
       setText("dashboardModel", document.getElementById("vision_model").value.trim() || "-");
 
       const cameraList = document.getElementById("dashboardCameras");
@@ -981,7 +986,9 @@
       return parts[parts.length - 1] || "";
     }
     function go2rtcStreamUrl(src) {
-      return "";
+      const base = document.getElementById("go2rtc_url").value.trim().replace(/\/$/, "");
+      if (!base || !src) return "";
+      return `${base}/stream.html?src=${encodeURIComponent(src)}&mode=mse`;
     }
     function cameraLiveUrl(camera) {
       const item = normalizeCamera(camera);
@@ -992,6 +999,7 @@
     function cameraVideoSource(camera, index) {
       const direct = cameraLiveUrl(camera);
       if (direct) return {url: direct, mode: "iframe"};
+      if (!normalizeCamera(camera).rtsp_url.trim()) return {url: "", mode: "none"};
       return {url: `/api/camera/video?index=${index}`, mode: "video"};
     }
     function cameraSnapshotSource(camera, index) {
@@ -1196,7 +1204,7 @@
       grid.innerHTML = "";
       const visible = cameras
         .map((camera, index) => ({camera: normalizeCamera(camera), index}))
-        .filter(item => item.camera.enabled && item.camera.rtsp_url.trim());
+        .filter(item => item.camera.enabled && (item.camera.rtsp_url.trim() || item.camera.live_url.trim() || cameraLiveUrl(item.camera)));
       for (const item of visible) {
         const camera = item.camera;
         const index = item.index;
@@ -1211,11 +1219,16 @@
           frame.src = source.url;
           frame.allow = "autoplay; fullscreen; picture-in-picture";
           card.append(title, frame);
-        } else {
+        } else if (source.mode === "video") {
           const img = document.createElement("img");
           img.alt = title.textContent;
           img.src = `${source.url}&ts=${Date.now()}`;
           card.append(title, img);
+        } else {
+          const empty = document.createElement("div");
+          empty.style.padding = "16px";
+          empty.textContent = "No live source configured";
+          card.append(title, empty);
         }
         grid.append(card);
       }
@@ -1285,14 +1298,6 @@
       }
     });
     document.getElementById("refreshStatusBtn").addEventListener("click", loadStatus);
-    document.getElementById("addCameraBtn").addEventListener("click", () => {
-      const rtspUrl = document.getElementById("rtsp_url").value.trim();
-      const streamName = streamNameFromRtsp(rtspUrl);
-      cameras.push({enabled: true, name: streamName, rtsp_url: rtspUrl, go2rtc_src: streamName, live_url: ""});
-      renderCameras();
-      renderLive();
-      renderDashboard();
-    });
     document.getElementById("saveCamerasBtn").addEventListener("click", async () => {
       try {
         const data = await api("/api/config", {
