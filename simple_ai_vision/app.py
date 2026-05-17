@@ -86,6 +86,8 @@ def default_options() -> dict[str, Any]:
     return {
         "go2rtc_url": "",
         "frigate_url": "",
+        "go2rtc_host_url": "",
+        "frigate_host_url": "",
         "ai_api_key": "",
         "ai_base_url": "https://api.openai.com/v1",
         "ai_model": "gpt-4o-mini",

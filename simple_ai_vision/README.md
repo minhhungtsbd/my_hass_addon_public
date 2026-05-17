@@ -56,6 +56,9 @@ Các trường chính:
 | Option | Mô tả |
 | --- | --- |
 | `go2rtc_url` | Base URL go2rtc, ví dụ `http://homeassistant.local:1984` |
+| `go2rtc_host_url` | URL go2rtc mà trình duyệt truy cập được, ví dụ `http://192.168.1.101:1984` |
+| `frigate_url` | Base URL Frigate API nội bộ, ví dụ `http://ccab4aaf-frigate:5000` |
+| `frigate_host_url` | URL Frigate mà trình duyệt truy cập được, ví dụ `http://192.168.1.101:5000` |
 | `ai_api_key` | API key provider OpenAI-compatible |
 | `ai_base_url` | Base URL API, ví dụ `https://api.openai.com/v1` hoặc `https://9router.example/v1` |
 | `ai_model` | Model vision cần dùng |
@@ -239,6 +242,14 @@ Response camera tắt Monitor:
 ## Tab Live
 
 Tab Live dùng snapshot refresh qua Simple AI Vision backend. Cách này hoạt động với Frigate add-on hostname nội bộ như `ccab4aaf-frigate`.
+
+Trong tab Live có thể đổi `View Mode` để thử đường truy cập khác nhau:
+
+- `Backend snapshot`: browser gọi Simple AI Vision, add-on tự lấy snapshot từ go2rtc/Frigate.
+- `go2rtc URL stream`: browser thử mở stream từ `go2rtc_url`.
+- `go2rtc Host stream`: browser thử mở stream từ `go2rtc_host_url`.
+- `Frigate URL latest image`: browser thử lấy ảnh mới nhất từ `frigate_url`.
+- `Frigate Host latest image`: browser thử lấy ảnh mới nhất từ `frigate_host_url`.
 
 ## Tab Sự Kiện
 

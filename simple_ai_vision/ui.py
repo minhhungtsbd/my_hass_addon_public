@@ -276,6 +276,7 @@ INDEX_HTML = r"""
       font-weight: 600;
       overflow-wrap: anywhere;
     }
+    .live-item iframe,
     .live-item img {
       display: block;
       width: 100%;
@@ -338,6 +339,7 @@ INDEX_HTML = r"""
       border-radius: 6px;
       overflow: hidden;
     }
+    .viewer-body iframe,
     .viewer-body img {
       display: block;
       width: 100%;
@@ -406,10 +408,12 @@ INDEX_HTML = r"""
         align-items: stretch;
         flex-direction: column;
       }
+      .viewer-body iframe,
       .viewer-body img {
         height: min(56vh, 420px);
       }
       .live-grid { grid-template-columns: 1fr; }
+      .live-item iframe,
       .live-item img { height: 220px; }
       .events-table,
       .events-table thead,
@@ -462,6 +466,16 @@ INDEX_HTML = r"""
           <label for="frigate_url">Frigate URL</label>
           <input id="frigate_url" autocomplete="off" placeholder="Optional, e.g. http://ccab4aaf-frigate:5000">
           <div class="hint">Used to load cameras from the Frigate add-on when no standalone go2rtc URL is configured.</div>
+        </div>
+        <div>
+          <label for="go2rtc_host_url">go2rtc Host URL</label>
+          <input id="go2rtc_host_url" autocomplete="off" placeholder="Optional, e.g. http://192.168.1.101:1984">
+          <div class="hint">Browser-accessible go2rtc URL for testing live video.</div>
+        </div>
+        <div>
+          <label for="frigate_host_url">Frigate Host URL</label>
+          <input id="frigate_host_url" autocomplete="off" placeholder="Optional, e.g. http://192.168.1.101:5000">
+          <div class="hint">Browser-accessible Frigate URL for testing latest camera images.</div>
         </div>
         <div>
           <label for="ai_base_url">AI Base URL</label>
@@ -562,6 +576,16 @@ cháy"></textarea>
       <h2>Live</h2>
       <div class="grid">
         <div>
+          <label for="liveViewMode">View Mode</label>
+          <select id="liveViewMode">
+            <option value="backend">Backend snapshot</option>
+            <option value="go2rtc_url">go2rtc URL stream</option>
+            <option value="go2rtc_host_url">go2rtc Host stream</option>
+            <option value="frigate_url">Frigate URL latest image</option>
+            <option value="frigate_host_url">Frigate Host latest image</option>
+          </select>
+        </div>
+        <div>
           <label for="liveLimit">Camera Limit</label>
           <input id="liveLimit" type="number" min="1" placeholder="All">
         </div>
@@ -596,6 +620,18 @@ cháy"></textarea>
             <button class="secondary" id="closeViewerBtn" type="button">Close</button>
           </div>
         </div>
+        <div class="grid" id="viewerModePanel" style="display:none">
+          <div class="full">
+            <label for="viewerViewMode">View Mode</label>
+            <select id="viewerViewMode">
+              <option value="backend">Backend snapshot</option>
+              <option value="go2rtc_url">go2rtc URL stream</option>
+              <option value="go2rtc_host_url">go2rtc Host stream</option>
+              <option value="frigate_url">Frigate URL latest image</option>
+              <option value="frigate_host_url">Frigate Host latest image</option>
+            </select>
+          </div>
+        </div>
         <div class="viewer-body" id="viewerBody"></div>
       </div>
     </dialog>
@@ -626,7 +662,8 @@ cháy"></textarea>
 
   <script>
     const fields = [
-      "go2rtc_url", "frigate_url", "ai_api_key", "ai_base_url", "ai_model",
+      "go2rtc_url", "frigate_url", "go2rtc_host_url", "frigate_host_url",
+      "ai_api_key", "ai_base_url", "ai_model",
       "telegram_bot_token", "telegram_chat_id", "prompt",
       "ai_timeout", "snapshot_timeout", "telegram_timeout"
     ];
@@ -635,6 +672,7 @@ cháy"></textarea>
     let editingPromptIndex = -1;
     let currentViewerUrl = "";
     let currentSnapshotCamera = "";
+    let currentLiveCameraSrc = "";
     let liveRefreshTimer = null;
     let viewerRefreshTimer = null;
 
@@ -658,6 +696,32 @@ cháy"></textarea>
 
     function snapshotUrl(camera) {
       return apiPath(`api/camera/frame?camera=${encodeURIComponent(camera)}&_=${Date.now()}`);
+    }
+
+    function baseUrlFromField(id) {
+      return document.getElementById(id).value.trim().replace(/\/+$/, "");
+    }
+
+    function streamUrl(camera, base) {
+      const query = new URLSearchParams({src: camera, mode: "mse"});
+      return `${base}/stream.html?${query.toString()}`;
+    }
+
+    function frigateLatestUrl(camera, base) {
+      return `${base}/api/${encodeURIComponent(camera)}/latest.jpg?_=${Date.now()}`;
+    }
+
+    function liveUrlForMode(camera, mode) {
+      if (mode === "backend") return {kind: "image", url: snapshotUrl(camera)};
+      if (mode === "go2rtc_url" || mode === "go2rtc_host_url") {
+        const base = baseUrlFromField(mode);
+        return base ? {kind: "iframe", url: streamUrl(camera, base)} : null;
+      }
+      if (mode === "frigate_url" || mode === "frigate_host_url") {
+        const base = baseUrlFromField(mode);
+        return base ? {kind: "image", url: frigateLatestUrl(camera, base)} : null;
+      }
+      return {kind: "image", url: snapshotUrl(camera)};
     }
 
     function cameraFrameUrl(camera) {
@@ -876,13 +940,14 @@ cháy"></textarea>
       return null;
     }
 
-    function showViewer(title, content, openUrl) {
+    function showViewer(title, content, openUrl, showModePanel = false) {
       currentViewerUrl = openUrl || "";
       stopViewerRefresh();
       document.getElementById("viewerTitle").textContent = title;
       const body = document.getElementById("viewerBody");
       body.innerHTML = "";
       body.append(content);
+      document.getElementById("viewerModePanel").style.display = showModePanel ? "" : "none";
       document.getElementById("openViewerBtn").style.display = currentViewerUrl ? "" : "none";
       document.getElementById("refreshViewerBtn").style.display = currentSnapshotCamera ? "" : "none";
       document.getElementById("viewerDialog").showModal();
@@ -910,22 +975,60 @@ cháy"></textarea>
     function viewVideo(camera, label = "") {
       const item = snapshotSourceOrError(camera);
       if (!item) return;
+      document.getElementById("viewerViewMode").value = document.getElementById("liveViewMode").value;
+      renderViewerLive(item, label || item.src);
+      document.getElementById("viewerDialog").showModal();
+    }
+
+    function renderViewerLive(item, label = "") {
+      const mode = document.getElementById("viewerViewMode").value;
+      const live = liveUrlForMode(item.src, mode);
+      const body = document.getElementById("viewerBody");
+      body.innerHTML = "";
+      stopViewerRefresh();
       currentSnapshotCamera = "";
-      const img = document.createElement("img");
-      img.id = "snapshotImage";
-      img.dataset.src = item.src;
-      img.alt = `Live snapshot ${label || item.src}`;
-      img.src = cameraFrameUrl(item);
-      currentSnapshotCamera = item.src;
-      showViewer(`Live snapshot: ${label || item.src}`, img, img.src);
-      viewerRefreshTimer = setInterval(refreshSnapshot, 1500);
+      currentLiveCameraSrc = item.src;
+      currentViewerUrl = "";
+      document.getElementById("viewerTitle").textContent = `Live: ${label || item.src}`;
+      document.getElementById("viewerModePanel").style.display = "";
+
+      if (!live) {
+        const message = document.createElement("div");
+        message.className = "hint";
+        message.textContent = "Selected live mode has no URL configured.";
+        body.append(message);
+      } else if (live.kind === "iframe") {
+        const frame = document.createElement("iframe");
+        frame.src = live.url;
+        frame.title = `Live ${label || item.src}`;
+        frame.allow = "autoplay; fullscreen; picture-in-picture";
+        body.append(frame);
+        currentViewerUrl = live.url;
+      } else {
+        const img = document.createElement("img");
+        img.id = "snapshotImage";
+        img.dataset.src = item.src;
+        img.dataset.mode = mode;
+        img.alt = `Live snapshot ${label || item.src}`;
+        img.src = live.url;
+        body.append(img);
+        currentSnapshotCamera = item.src;
+        currentViewerUrl = live.url;
+        viewerRefreshTimer = setInterval(refreshSnapshot, mode === "backend" ? 1500 : 3000);
+      }
+
+      document.getElementById("openViewerBtn").style.display = currentViewerUrl ? "" : "none";
+      document.getElementById("refreshViewerBtn").style.display = currentSnapshotCamera ? "" : "none";
     }
 
     function refreshSnapshot() {
       const img = document.getElementById("snapshotImage");
       if (!img) return;
       const src = img.dataset.src || "";
-      img.src = snapshotUrl(src);
+      const mode = img.dataset.mode || "backend";
+      const live = liveUrlForMode(src, mode);
+      if (!live) return;
+      img.src = live.url;
       currentViewerUrl = img.src;
     }
 
@@ -1102,6 +1205,7 @@ cháy"></textarea>
       }
       grid.innerHTML = "";
       const items = liveCameraItems();
+      const mode = document.getElementById("liveViewMode").value;
       if (!items.length) {
         grid.textContent = "No camera matches the selected live filter.";
         return;
@@ -1119,10 +1223,23 @@ cháy"></textarea>
         srcLabel.textContent = camera.src;
         title.append(name, srcLabel);
 
-        const media = document.createElement("img");
-        media.dataset.src = camera.src;
-        media.src = snapshotUrl(camera.src);
-        media.alt = `Live snapshot ${cameraLabel(camera)}`;
+        const live = liveUrlForMode(camera.src, mode);
+        let media;
+        if (!live) {
+          media = document.createElement("div");
+          media.className = "hint";
+          media.textContent = "No URL configured for selected view mode.";
+        } else if (live.kind === "iframe") {
+          media = document.createElement("iframe");
+          media.src = live.url;
+          media.allow = "autoplay; fullscreen; picture-in-picture";
+        } else {
+          media = document.createElement("img");
+          media.dataset.src = camera.src;
+          media.dataset.mode = mode;
+          media.src = live.url;
+          media.alt = `Live snapshot ${cameraLabel(camera)}`;
+        }
         media.title = `Live ${cameraLabel(camera)}`;
 
         item.append(title, media);
@@ -1132,9 +1249,11 @@ cháy"></textarea>
       liveRefreshTimer = setInterval(() => {
         document.querySelectorAll("#liveGrid img").forEach(img => {
           const src = img.dataset.src || "";
-          img.src = snapshotUrl(src);
+          const imageMode = img.dataset.mode || "backend";
+          const live = liveUrlForMode(src, imageMode);
+          if (live) img.src = live.url;
         });
-      }, 5000);
+      }, mode === "backend" ? 5000 : 8000);
     }
 
     function renderEvents(events) {
@@ -1321,6 +1440,12 @@ cháy"></textarea>
     document.getElementById("loadStreamsBtn").addEventListener("click", loadGo2rtcStreams);
     document.getElementById("addStreamBtn").addEventListener("click", addSelectedStream);
     document.getElementById("refreshLiveBtn").addEventListener("click", renderLiveCameras);
+    document.getElementById("liveViewMode").addEventListener("change", renderLiveCameras);
+    document.getElementById("viewerViewMode").addEventListener("change", () => {
+      const src = currentLiveCameraSrc || currentSnapshotCamera || document.getElementById("snapshotImage")?.dataset.src || "";
+      if (!src) return;
+      renderViewerLive({src}, src);
+    });
     document.getElementById("liveLimit").addEventListener("input", renderLiveCameras);
     document.getElementById("refreshEventsBtn").addEventListener("click", loadEvents);
     document.getElementById("addCameraBtn").addEventListener("click", () => {
@@ -1332,6 +1457,7 @@ cháy"></textarea>
       document.getElementById("viewerDialog").close();
       document.getElementById("viewerBody").innerHTML = "";
       currentSnapshotCamera = "";
+      currentLiveCameraSrc = "";
     });
     document.getElementById("openViewerBtn").addEventListener("click", () => {
       if (currentViewerUrl) window.open(currentViewerUrl, "_blank", "noopener");
