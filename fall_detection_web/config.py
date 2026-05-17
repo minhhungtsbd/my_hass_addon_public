@@ -249,11 +249,13 @@ def normalize_cameras(config: dict[str, Any]) -> list[dict[str, Any]]:
             "go2rtc_src": str(cam.get("go2rtc_src", "")).strip(),
             "live_url": str(cam.get("live_url", "")).strip(),
             "prompt_id": str(cam.get("prompt_id", "")).strip(),
+            "teldrive_upload_images": cam.get("teldrive_upload_images") is not False,
+            "teldrive_record_enabled": cam.get("teldrive_record_enabled") is True,
         })
     # Fallback: top-level rtsp_url → single default camera
     fallback = str(config.get("rtsp_url", "")).strip()
     if not cameras and fallback:
-        cameras.append({"enabled": True, "name": "Default", "rtsp_url": fallback, "go2rtc_src": "", "live_url": "", "prompt_id": ""})
+        cameras.append({"enabled": True, "name": "Default", "rtsp_url": fallback, "go2rtc_src": "", "live_url": "", "prompt_id": "", "teldrive_upload_images": True, "teldrive_record_enabled": False})
     return cameras
 
 

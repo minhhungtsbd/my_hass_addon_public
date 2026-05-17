@@ -94,8 +94,6 @@ cp .env.example .env
 | `TELDRIVE_TOKEN` | `teldrive_token` | Bearer token Teldrive |
 | `TELDRIVE_ROOT_PATH` | `teldrive_root_path` | Thư mục gốc trên Teldrive |
 | `TELDRIVE_CHANNEL_ID` | `teldrive_channel_id` | Channel ID Teldrive tùy chọn |
-| `TELDRIVE_UPLOAD_IMAGES` | `teldrive_upload_images` | Upload ảnh event |
-| `TELDRIVE_RECORD_ENABLED` | `teldrive_record_enabled` | Ghi clip ngắn khi YOLO phát hiện người |
 | `TELDRIVE_RECORD_SECONDS` | `teldrive_record_seconds` | Số giây ghi clip |
 | `TELDRIVE_RECORD_COOLDOWN` | `teldrive_record_cooldown` | Cooldown giữa 2 lần ghi clip/camera |
 
@@ -126,13 +124,14 @@ Khi khởi động lần đầu, nếu tồn tại file cũ:
 | Tab | Chức năng |
 |---|---|
 | **Dashboard** | Start/Stop monitor, tổng quan trạng thái, 5 events gần nhất |
-| **Cameras** | Thêm/sửa/xóa camera, test snapshot, test AI từng camera |
+| **Cameras** | Thêm/sửa/xóa camera, test snapshot, test AI từng camera, bật/tắt upload ảnh/video theo camera |
 | **Live** | Xem stream live đa camera, chọn 1/2/3 cột; double-click camera ở 2/3 cột để chuyển camera đó sang full width |
 | **Settings** | Cấu hình YOLO, AI API, Telegram, cooldown, RTSP… |
-| **Events** | Bảng log events với thumbnail ảnh, nút Clear All |
+| **Events** | Bảng log events với thumbnail ảnh; ưu tiên ảnh từ Teldrive nếu đã upload |
+| **Recordings** | Xem lại clip đã upload theo camera và khung thời gian |
 | **Tools** | Test AI với snapshot, upload ảnh test, test Telegram |
 
-URL hash: `#dashboard`, `#cameras`, `#live`, `#settings`, `#events`, `#tools`
+URL hash: `#dashboard`, `#cameras`, `#live`, `#settings`, `#events`, `#recordings`, `#tools`
 
 ## API Endpoints
 
@@ -153,6 +152,7 @@ POST /api/stop                   # Dừng monitor
 
 GET  /api/events                 # Lấy danh sách events
 DELETE /api/events               # Xóa toàn bộ events
+GET  /api/recordings             # Lấy clip Teldrive đã upload, lọc camera/date_from/date_to
 
 GET  /api/camera/snapshot?index= # Chụp ảnh camera
 GET  /api/camera/video?index=    # MJPEG stream camera
@@ -163,6 +163,7 @@ POST /api/test-telegram          # Test gửi Telegram
 POST /api/test-ai-upload         # Test AI với ảnh upload (max 10MB)
 
 GET  /api/event-image/{filename} # Ảnh event (yêu cầu đăng nhập)
+GET  /api/teldrive/file/{id}/{name} # Proxy file Teldrive qua phiên đăng nhập Fall Detection
 ```
 
 ## Nhiều Camera
@@ -176,6 +177,8 @@ Camera được cấu hình trong tab **Cameras**. Mỗi camera gồm:
 | RTSP URL | URL RTSP để YOLO capture frame |
 | go2rtc src | Tên stream trong go2rtc (cho snapshot JPEG và live view) |
 | Live URL | (Tùy chọn) URL stream trực tiếp thay vì tự build từ go2rtc_src |
+| Upload event images | Upload ảnh event của camera này lên Teldrive |
+| Record/upload video | Ghi và upload clip ngắn khi camera này phát hiện `person` |
 
 Thứ tự ưu tiên lấy **snapshot thủ công / test AI**:
 
@@ -186,7 +189,7 @@ Monitor chạy nền vẫn dùng RTSP frame để YOLO local detect `person`. go
 
 ## Teldrive Upload
 
-Khi bật trong tab **Settings**, app có thể upload ảnh event và clip ngắn lên Teldrive self-hosted.
+Trong tab **Settings**, bật Teldrive và cấu hình base URL/token/root path chung. Tùy chọn upload ảnh event và ghi/upload video nằm trong từng camera để có thể bật riêng theo nhu cầu.
 
 `TELDRIVE_TOKEN` là giá trị cookie `access_token` của phiên đăng nhập Teldrive. Browser không cho trang Fall Detection đọc cookie của domain Teldrive, nên không thể tự động lấy token chỉ bằng một nút bấm nếu hai app chạy khác origin. Hãy copy `access_token` từ DevTools/Cookie Editor rồi dùng nút **Check Teldrive Token** trong Settings để kiểm tra token còn live hay đã hết hạn.
 
@@ -203,6 +206,8 @@ Mặc định app dùng `https://teldrive.minhhungtsbd.me` và lưu theo cấu t
 /Fall Detection/{camera}/images/
 /Fall Detection/{camera}/videos/
 ```
+
+Sau khi upload thành công, app lưu lại `file id`, `name` và `path` của Teldrive vào event. Cột ảnh trong tab **Events** sẽ dùng proxy Teldrive nếu có metadata upload, nếu chưa có thì fallback về ảnh local trong `data/event_images/`. Tab **Recordings** dùng metadata video đã lưu để xem lại/lọc theo camera và thời gian.
 
 Clip ghi hình dùng OpenCV `VideoWriter` định dạng `.avi` để tránh phụ thuộc `ffmpeg`.
 

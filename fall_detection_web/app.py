@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import Any
 
 from fastapi import Body, Depends, FastAPI, Form, HTTPException, Request, Response, status
-from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse
+from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse, StreamingResponse
 from fastapi.templating import Jinja2Templates
 
 import ai
@@ -142,6 +142,21 @@ async def event_image(filename: str, _: str = Depends(auth.require_auth)):
     )
 
 
+@app.get("/api/teldrive/file/{file_id}/{file_name}")
+async def teldrive_file(file_id: str, file_name: str, _: str = Depends(auth.require_auth)):
+    try:
+        c = config.read_config()
+        response = teldrive.download_file(c, file_id, file_name)
+        media_type = response.headers.get("content-type", "application/octet-stream")
+        return StreamingResponse(
+            response.iter_content(chunk_size=1024 * 256),
+            media_type=media_type,
+            headers={"Cache-Control": "private, max-age=300"},
+        )
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+
 # ──────────────────────────────────────────────
 # API Routes
 # ──────────────────────────────────────────────
@@ -256,6 +271,18 @@ async def get_events(
         "page": page,
         "limit": limit
     }
+
+
+@app.get("/api/recordings")
+async def get_recordings(
+    camera: str | None = None,
+    date_from: str | None = None,
+    date_to: str | None = None,
+    _: str = Depends(auth.require_auth)
+):
+    if camera == "" or camera == "All":
+        camera = None
+    return {"success": True, "recordings": db.get_recordings(camera=camera, date_from=date_from, date_to=date_to)}
 
 @app.delete("/api/events")
 async def clear_events(_: str = Depends(auth.require_auth)):

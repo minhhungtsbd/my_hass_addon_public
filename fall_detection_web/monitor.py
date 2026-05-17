@@ -72,21 +72,26 @@ def capture_rtsp_snapshot(rtsp_url: str, output_path: Path) -> Path:
     return output_path
 
 
-def log_event(config: dict[str, Any], status_name: str, image_path: Path | None = None, **fields: Any) -> None:
-    image_file = insert_event(status_name, image_path=image_path, **fields)
-    if image_file and teldrive.enabled(config):
+def log_event(config: dict[str, Any], status_name: str, image_path: Path | None = None, camera_config: dict[str, Any] | None = None, **fields: Any) -> None:
+    event = insert_event(status_name, image_path=image_path, **fields)
+    image_file = str(event.get("image_file", ""))
+    upload_images = True if camera_config is None else camera_config.get("teldrive_upload_images") is not False
+    if image_file and upload_images and teldrive.enabled(config):
         camera_name = str(fields.get("camera", "Camera") or "Camera")
         stored_path = DATA_DIR / "event_images" / image_file
         threading.Thread(
             target=upload_event_image_safe,
-            args=(config.copy(), stored_path, camera_name),
+            args=(config.copy(), stored_path, camera_name, int(event["id"])),
             daemon=True,
         ).start()
 
 
-def upload_event_image_safe(config: dict[str, Any], image_path: Path, camera_name: str) -> None:
+def upload_event_image_safe(config: dict[str, Any], image_path: Path, camera_name: str, event_id: int) -> None:
     try:
-        teldrive.upload_event_image(config, image_path, camera_name)
+        file_data = teldrive.upload_event_image(config, image_path, camera_name)
+        if file_data:
+            import db
+            db.update_event_teldrive_image(event_id, file_data)
     except Exception as exc:
         logger.warning("[TELDRIVE] image upload failed camera=%s: %s", camera_name, exc)
         insert_event("teldrive_image_error", camera=camera_name, error=str(exc))
@@ -94,8 +99,15 @@ def upload_event_image_safe(config: dict[str, Any], image_path: Path, camera_nam
 
 def upload_event_video_safe(config: dict[str, Any], video_path: Path, camera_name: str) -> None:
     try:
-        teldrive.upload_event_video(config, video_path, camera_name)
-        insert_event("teldrive_video_uploaded", camera=camera_name, message=video_path.name)
+        file_data = teldrive.upload_event_video(config, video_path, camera_name)
+        insert_event(
+            "teldrive_video_uploaded",
+            camera=camera_name,
+            message=video_path.name,
+            teldrive_video_id=str(file_data.get("id", "")),
+            teldrive_video_name=str(file_data.get("name", "")),
+            teldrive_video_path=str(file_data.get("path", "")),
+        )
     except Exception as exc:
         logger.warning("[TELDRIVE] video upload failed camera=%s: %s", camera_name, exc)
         insert_event("teldrive_video_error", camera=camera_name, error=str(exc))
@@ -234,6 +246,7 @@ def process_camera_verification(
             config,
             event_source,
             image_path=image_path,
+            camera_config=camera,
             camera=camera_name,
             confidence=confidence,
             ai_result=ai_result,
@@ -243,7 +256,7 @@ def process_camera_verification(
         )
     except Exception as exc:
         set_state(last_error=str(exc), last_verify_at=now_iso(), last_camera=camera_name)
-        log_event(config, "ai_error", image_path=image_path, camera=camera_name, confidence=confidence, error=str(exc))
+        log_event(config, "ai_error", image_path=image_path, camera_config=camera, camera=camera_name, confidence=confidence, error=str(exc))
         return {"success": False, "camera": camera_name, "error": str(exc), "result": ai_result}
 
     if ai_result == "EMERGENCY":
@@ -257,12 +270,12 @@ def process_camera_verification(
                 )
                 last_alert[alert_key] = now
                 set_state(last_alert_at=now_iso())
-                log_event(config, "telegram_sent", image_path=image_path, camera=camera_name, confidence=confidence, ai_result=ai_result)
+                log_event(config, "telegram_sent", image_path=image_path, camera_config=camera, camera=camera_name, confidence=confidence, ai_result=ai_result)
             except Exception as exc:
                 set_state(last_error=str(exc), last_camera=camera_name)
-                log_event(config, "telegram_error", image_path=image_path, camera=camera_name, confidence=confidence, error=str(exc))
+                log_event(config, "telegram_error", image_path=image_path, camera_config=camera, camera=camera_name, confidence=confidence, error=str(exc))
         else:
-            log_event(config, "cooldown", image_path=image_path, camera=camera_name, confidence=confidence, ai_result=ai_result)
+            log_event(config, "cooldown", image_path=image_path, camera_config=camera, camera=camera_name, confidence=confidence, ai_result=ai_result)
 
     return {
         "success": True,
@@ -380,7 +393,7 @@ def _monitor_loop(config: dict[str, Any]) -> None:
                     logger.info("[PERSON] camera=%s confidence=%.2f", camera_name, best_confidence)
                     if (
                         teldrive.enabled(config)
-                        and config.get("teldrive_record_enabled")
+                        and camera.get("teldrive_record_enabled")
                         and now - last_record[index] > float(config.get("teldrive_record_cooldown", 300))
                     ):
                         last_record[index] = now
@@ -403,6 +416,7 @@ def _monitor_loop(config: dict[str, Any]) -> None:
                                 config,
                                 "verified",
                                 image_path=verify_path,
+                                camera_config=camera,
                                 camera=camera_name,
                                 confidence=best_confidence,
                                 ai_result=ai_result,
@@ -413,7 +427,7 @@ def _monitor_loop(config: dict[str, Any]) -> None:
                         except Exception as exc:
                             last_verify[index] = now
                             set_state(last_error=str(exc), last_verify_at=now_iso())
-                            log_event(config, "ai_error", image_path=verify_path, camera=camera_name, confidence=best_confidence, error=str(exc))
+                            log_event(config, "ai_error", image_path=verify_path, camera_config=camera, camera=camera_name, confidence=best_confidence, error=str(exc))
                             ai_result = "SAFE"
 
                         if ai_result == "EMERGENCY":
@@ -426,12 +440,12 @@ def _monitor_loop(config: dict[str, Any]) -> None:
                                     )
                                     last_alert[index] = now
                                     set_state(last_alert_at=now_iso())
-                                    log_event(config, "telegram_sent", image_path=verify_path, camera=camera_name, confidence=best_confidence, ai_result=ai_result)
+                                    log_event(config, "telegram_sent", image_path=verify_path, camera_config=camera, camera=camera_name, confidence=best_confidence, ai_result=ai_result)
                                 except Exception as exc:
                                     set_state(last_error=str(exc))
-                                    log_event(config, "telegram_error", image_path=verify_path, camera=camera_name, confidence=best_confidence, error=str(exc))
+                                    log_event(config, "telegram_error", image_path=verify_path, camera_config=camera, camera=camera_name, confidence=best_confidence, error=str(exc))
                             else:
-                                log_event(config, "cooldown", image_path=verify_path, camera=camera_name, confidence=best_confidence, ai_result=ai_result)
+                                log_event(config, "cooldown", image_path=verify_path, camera_config=camera, camera=camera_name, confidence=best_confidence, ai_result=ai_result)
 
             time.sleep(float(config["loop_sleep"]))
     except Exception as exc:

@@ -168,11 +168,20 @@ def upload_file(config: dict[str, Any], local_path: Path, folder: str, file_name
     return file_response.json()
 
 
-def upload_event_image(config: dict[str, Any], local_path: Path, camera_name: str) -> None:
-    if not config.get("teldrive_upload_images", True):
-        return
-    upload_file(config, local_path, remote_folder(config, camera_name, "images"))
+def upload_event_image(config: dict[str, Any], local_path: Path, camera_name: str) -> dict[str, Any]:
+    return upload_file(config, local_path, remote_folder(config, camera_name, "images"))
 
 
-def upload_event_video(config: dict[str, Any], local_path: Path, camera_name: str) -> None:
-    upload_file(config, local_path, remote_folder(config, camera_name, "videos"))
+def upload_event_video(config: dict[str, Any], local_path: Path, camera_name: str) -> dict[str, Any]:
+    return upload_file(config, local_path, remote_folder(config, camera_name, "videos"))
+
+
+def download_file(config: dict[str, Any], file_id: str, file_name: str) -> requests.Response:
+    response = _session.get(
+        f"{_api_base(config)}/files/{file_id}/{file_name}",
+        headers=_headers(config),
+        stream=True,
+        timeout=60,
+    )
+    response.raise_for_status()
+    return response

@@ -261,6 +261,12 @@
       background: #03070b;
       display: block;
     }
+    .truncate {
+      max-width: 300px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
     .dropdown {
       position: relative;
       display: inline-block;
@@ -390,6 +396,7 @@
         flex-direction: column;
         align-items: stretch;
       }
+      .truncate { max-width: 100%; }
       button { width: 100%; }
       .actions { align-items: stretch; flex-direction: column; }
       th:nth-child(5), td:nth-child(5) { display: none; }
@@ -426,6 +433,7 @@
       <button class="tab-btn" data-tab="livePanel" type="button">Live</button>
       <button class="tab-btn" data-tab="settingsPanel" type="button">Settings</button>
       <button class="tab-btn" data-tab="eventsPanel" type="button">Events</button>
+      <button class="tab-btn" data-tab="recordingsPanel" type="button">Recordings</button>
       <button class="tab-btn" data-tab="toolsPanel" type="button">Tools</button>
     </nav>
 
@@ -613,14 +621,6 @@
             <input id="teldrive_enabled" type="checkbox">
             Enable Teldrive upload
           </label>
-          <label class="checkbox-wrap">
-            <input id="teldrive_upload_images" type="checkbox">
-            Upload event images
-          </label>
-          <label class="checkbox-wrap">
-            <input id="teldrive_record_enabled" type="checkbox">
-            Record and upload clip when person is detected
-          </label>
           <div>
             <label for="teldrive_base_url">Teldrive Base URL</label>
             <input id="teldrive_base_url" autocomplete="off" placeholder="https://teldrive.minhhungtsbd.me">
@@ -705,6 +705,25 @@
       </div>
     </section>
 
+    <section id="recordingsPanel" class="tab-panel hidden">
+      <div class="panel">
+        <h2>Recordings</h2>
+        <div class="actions" style="margin-bottom: 12px;">
+          <select id="recordingFilterCamera" style="max-width:220px"></select>
+          <input id="recordingDateFrom" type="datetime-local" style="max-width:220px">
+          <input id="recordingDateTo" type="datetime-local" style="max-width:220px">
+          <button id="refreshRecordingsBtn" type="button">Filter & Refresh</button>
+          <span id="recordingsStatus"></span>
+        </div>
+        <table>
+          <thead>
+            <tr><th>Time</th><th>Camera</th><th>Video</th><th>Teldrive Path</th></tr>
+          </thead>
+          <tbody id="recordingsBody"></tbody>
+        </table>
+      </div>
+    </section>
+
     <section id="toolsPanel" class="tab-panel hidden">
       <div class="panel">
         <h2>Tools</h2>
@@ -758,6 +777,12 @@
           <label>Live URL (Optional)</label>
           <input id="modalCamLive" type="text" autocomplete="off" placeholder="http://10.10.0.2:1984/stream.html?src=bep_sub">
         </div>
+        <label class="checkbox-wrap">
+          <input id="modalCamUploadImages" type="checkbox" checked> Upload event images
+        </label>
+        <label class="checkbox-wrap">
+          <input id="modalCamRecordVideo" type="checkbox"> Record/upload video on person detection
+        </label>
         <div>
           <label>AI Prompt</label>
           <select id="modalCamPrompt">
@@ -804,7 +829,7 @@
       "confidence", "verify_interval", "alert_cooldown", "frame_skip", "loop_sleep", "yolo_imgsz",
       "teldrive_record_seconds", "teldrive_record_cooldown"
     ];
-    const checkboxIds = ["teldrive_enabled", "teldrive_upload_images", "teldrive_record_enabled"];
+    const checkboxIds = ["teldrive_enabled"];
     const configIds = [
       "ai_base_url", "go2rtc_url", "ai_api_key", "vision_model", "fallback_vision_model", "verify_prompt", "detection_mode", "yolo_model",
       "telegram_bot_token", "telegram_chat_id", "teldrive_base_url", "teldrive_token", "teldrive_root_path", "teldrive_channel_id",
@@ -1073,6 +1098,59 @@
         setStatus("eventsStatus", err.message, "err");
       }
     }
+    function toUtcIsoFromLocalInput(value) {
+      if (!value) return "";
+      const date = new Date(value);
+      if (Number.isNaN(date.getTime())) return "";
+      return date.toISOString().replace(/\.\d{3}Z$/, "+00:00");
+    }
+    async function loadRecordings() {
+      try {
+        const camera = document.getElementById("recordingFilterCamera").value;
+        const dateFrom = toUtcIsoFromLocalInput(document.getElementById("recordingDateFrom").value);
+        const dateTo = toUtcIsoFromLocalInput(document.getElementById("recordingDateTo").value);
+        const data = await api(`/api/recordings?camera=${encodeURIComponent(camera)}&date_from=${encodeURIComponent(dateFrom)}&date_to=${encodeURIComponent(dateTo)}`, {timeout: 10000});
+        renderRecordings(data.recordings || []);
+      } catch (err) {
+        setStatus("recordingsStatus", err.message, "err");
+      }
+    }
+    function renderRecordings(recordings) {
+      const body = document.getElementById("recordingsBody");
+      body.innerHTML = "";
+      for (const item of recordings) {
+        const row = document.createElement("tr");
+        const videoCell = document.createElement("td");
+        const video = document.createElement("video");
+        video.controls = true;
+        video.preload = "metadata";
+        video.src = item.video_url;
+        video.style.width = "220px";
+        videoCell.append(video);
+        const open = document.createElement("button");
+        open.type = "button";
+        open.textContent = "Open";
+        open.onclick = () => window.open(item.video_url, "_blank");
+        videoCell.append(open);
+        const values = [
+          item.time_local || formatLocalTime(item.time),
+          item.camera || "",
+          null,
+          item.teldrive_video_path || ""
+        ];
+        for (const value of values) {
+          if (value === null) {
+            row.append(videoCell);
+            continue;
+          }
+          const cell = document.createElement("td");
+          cell.textContent = value;
+          row.append(cell);
+        }
+        body.append(row);
+      }
+      setStatus("recordingsStatus", `Loaded ${recordings.length} recording(s)`, recordings.length ? "ok" : "warn");
+    }
     function normalizeCamera(camera = {}) {
       return {
         enabled: camera.enabled !== false,
@@ -1080,7 +1158,9 @@
         rtsp_url: camera.rtsp_url || "",
         go2rtc_src: camera.go2rtc_src || "",
         live_url: camera.live_url || "",
-        prompt_id: camera.prompt_id || ""
+        prompt_id: camera.prompt_id || "",
+        teldrive_upload_images: camera.teldrive_upload_images !== false,
+        teldrive_record_enabled: camera.teldrive_record_enabled === true
       };
     }
     function streamNameFromRtsp(rtspUrl) {
@@ -1190,7 +1270,7 @@
           <td style="padding: 10px;">${camera.name || "-"}</td>
           <td style="padding: 10px; word-break: break-all; font-size: 13px;">${camera.rtsp_url || "-"}</td>
           <td style="padding: 10px;">${camera.go2rtc_src || "-"}</td>
-          <td style="padding: 10px; word-break: break-all; font-size: 13px;">${camera.live_url || "-"}</td>
+          <td style="padding: 10px; font-size: 13px;"><div class="truncate" title="${camera.live_url || ""}">${camera.live_url || "-"}</div></td>
           <td style="padding: 10px;">${promptName}</td>
           <td style="padding: 10px; text-align: right; white-space: nowrap;">
             <div class="dropdown">
@@ -1254,8 +1334,11 @@
       });
       renderLive();
       const eventFilterSelect = document.getElementById("eventFilterCamera");
+      const recordingFilterSelect = document.getElementById("recordingFilterCamera");
       const currentEventFilter = eventFilterSelect.value;
+      const currentRecordingFilter = recordingFilterSelect.value;
       eventFilterSelect.innerHTML = '<option value="">All Cameras</option>';
+      recordingFilterSelect.innerHTML = '<option value="">All Cameras</option>';
       cameras.forEach((c) => {
         const name = c.name || c.rtsp_url;
         if(name) {
@@ -1263,9 +1346,11 @@
           opt.value = name;
           opt.textContent = name;
           eventFilterSelect.appendChild(opt);
+          recordingFilterSelect.appendChild(opt.cloneNode(true));
         }
       });
       eventFilterSelect.value = currentEventFilter;
+      recordingFilterSelect.value = currentRecordingFilter;
     }
 
     function openCameraModal(index = -1) {
@@ -1273,13 +1358,15 @@
       const modal = document.getElementById("cameraModal");
       document.getElementById("cameraModalTitle").textContent = index >= 0 ? "Edit Camera" : "Add Camera";
       
-      const cam = index >= 0 ? cameras[index] : {enabled: true, name: "", rtsp_url: "", go2rtc_src: "", live_url: "", prompt_id: ""};
+      const cam = index >= 0 ? cameras[index] : {enabled: true, name: "", rtsp_url: "", go2rtc_src: "", live_url: "", prompt_id: "", teldrive_upload_images: true, teldrive_record_enabled: false};
       document.getElementById("modalCamEnabled").checked = cam.enabled;
       document.getElementById("modalCamName").value = cam.name;
       document.getElementById("modalCamRtsp").value = cam.rtsp_url;
       document.getElementById("modalCamGo2rtc").value = cam.go2rtc_src;
       document.getElementById("modalCamLive").value = cam.live_url;
       document.getElementById("modalCamPrompt").value = cam.prompt_id || "";
+      document.getElementById("modalCamUploadImages").checked = cam.teldrive_upload_images !== false;
+      document.getElementById("modalCamRecordVideo").checked = cam.teldrive_record_enabled === true;
       modal.showModal();
     }
 
@@ -1292,7 +1379,9 @@
         rtsp_url: document.getElementById("modalCamRtsp").value.trim(),
         go2rtc_src: document.getElementById("modalCamGo2rtc").value.trim(),
         live_url: document.getElementById("modalCamLive").value.trim(),
-        prompt_id: document.getElementById("modalCamPrompt").value
+        prompt_id: document.getElementById("modalCamPrompt").value,
+        teldrive_upload_images: document.getElementById("modalCamUploadImages").checked,
+        teldrive_record_enabled: document.getElementById("modalCamRecordVideo").checked
       };
       if (!cam.name && !cam.rtsp_url) return alert("Name or RTSP URL is required");
       
@@ -1489,6 +1578,8 @@
       eventsCurrentPage = 1;
       loadEvents();
     });
+    document.getElementById("refreshRecordingsBtn").addEventListener("click", loadRecordings);
+    document.getElementById("recordingFilterCamera").addEventListener("change", loadRecordings);
     document.getElementById("prevPageBtn").addEventListener("click", () => {
       if (eventsCurrentPage > 1) {
         eventsCurrentPage--;
@@ -1564,6 +1655,7 @@
     loadConfig().catch(err => setStatus("configStatus", err.message, "err"));
     loadStatus().catch(() => {});
     loadEvents().catch(() => {});
+    loadRecordings().catch(() => {});
     const initialTab = `${(location.hash || "#dashboard").slice(1)}Panel`;
     if (document.getElementById(initialTab)) showTab(initialTab);
     setInterval(loadStatus, 5000);

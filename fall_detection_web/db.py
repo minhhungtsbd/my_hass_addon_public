@@ -12,6 +12,7 @@ from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Generator
+from urllib.parse import quote
 
 ROOT = Path(__file__).resolve().parent
 DATA_DIR = ROOT / "data"
@@ -67,7 +68,13 @@ def init_db() -> None:
                 ai_response TEXT,
                 message     TEXT,
                 error       TEXT,
-                image_file  TEXT
+                image_file  TEXT,
+                teldrive_image_id TEXT,
+                teldrive_image_name TEXT,
+                teldrive_image_path TEXT,
+                teldrive_video_id TEXT,
+                teldrive_video_name TEXT,
+                teldrive_video_path TEXT
             );
 
             CREATE TABLE IF NOT EXISTS users (
@@ -85,7 +92,19 @@ def init_db() -> None:
 
             CREATE INDEX IF NOT EXISTS idx_events_time ON events (time DESC);
         """)
+        _ensure_column(conn, "events", "teldrive_image_id", "TEXT")
+        _ensure_column(conn, "events", "teldrive_image_name", "TEXT")
+        _ensure_column(conn, "events", "teldrive_image_path", "TEXT")
+        _ensure_column(conn, "events", "teldrive_video_id", "TEXT")
+        _ensure_column(conn, "events", "teldrive_video_name", "TEXT")
+        _ensure_column(conn, "events", "teldrive_video_path", "TEXT")
     _migrate_jsonl()
+
+
+def _ensure_column(conn: sqlite3.Connection, table: str, column: str, col_type: str) -> None:
+    columns = {row[1] for row in conn.execute(f"PRAGMA table_info({table})").fetchall()}
+    if column not in columns:
+        conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {col_type}")
 
 
 def _migrate_jsonl() -> None:
@@ -209,14 +228,14 @@ def _prune_events(conn: sqlite3.Connection) -> None:
         logger.info("[DB] Pruned %d old events", to_delete)
 
 
-def insert_event(status_name: str, image_path: Path | None = None, **fields: Any) -> str:
+def insert_event(status_name: str, image_path: Path | None = None, **fields: Any) -> dict[str, Any]:
     image_file = save_event_image(image_path, status_name)
     t = now_iso()
     t_local = local_iso()
     with get_conn() as conn:
-        conn.execute(
-            "INSERT INTO events (time,time_local,status,camera,confidence,ai_result,ai_raw,ai_response,message,error,image_file) "
-            "VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+        cur = conn.execute(
+            "INSERT INTO events (time,time_local,status,camera,confidence,ai_result,ai_raw,ai_response,message,error,image_file,teldrive_image_id,teldrive_image_name,teldrive_image_path,teldrive_video_id,teldrive_video_name,teldrive_video_path) "
+            "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
             (
                 t,
                 t_local,
@@ -229,10 +248,30 @@ def insert_event(status_name: str, image_path: Path | None = None, **fields: Any
                 fields.get("message", ""),
                 fields.get("error", ""),
                 image_file,
+                fields.get("teldrive_image_id", ""),
+                fields.get("teldrive_image_name", ""),
+                fields.get("teldrive_image_path", ""),
+                fields.get("teldrive_video_id", ""),
+                fields.get("teldrive_video_name", ""),
+                fields.get("teldrive_video_path", ""),
             ),
         )
+        event_id = cur.lastrowid
         _prune_events(conn)
-    return image_file
+    return {"id": event_id, "image_file": image_file}
+
+
+def update_event_teldrive_image(event_id: int, file_data: dict[str, Any]) -> None:
+    with get_conn() as conn:
+        conn.execute(
+            "UPDATE events SET teldrive_image_id=?, teldrive_image_name=?, teldrive_image_path=? WHERE id=?",
+            (
+                str(file_data.get("id", "")),
+                str(file_data.get("name", "")),
+                str(file_data.get("path", "")),
+                event_id,
+            ),
+        )
 
 
 def get_events(
@@ -264,10 +303,36 @@ def get_events(
     for row in rows:
         event = dict(row)
         image_file = str(event.get("image_file") or "").strip()
-        if image_file and (EVENT_IMAGES_DIR / image_file).exists():
+        if event.get("teldrive_image_id") and event.get("teldrive_image_name"):
+            name = quote(str(event["teldrive_image_name"]), safe="")
+            event["image_url"] = f"/api/teldrive/file/{event['teldrive_image_id']}/{name}"
+        elif image_file and (EVENT_IMAGES_DIR / image_file).exists():
             event["image_url"] = f"/api/event-image/{image_file}"
         events.append(event)
     return events
+
+
+def get_recordings(limit: int = 100, camera: str | None = None, date_from: str | None = None, date_to: str | None = None) -> list[dict[str, Any]]:
+    query = "SELECT * FROM events WHERE teldrive_video_id IS NOT NULL AND teldrive_video_id != ''"
+    params: list[Any] = []
+    if camera:
+        query += " AND camera = ?"
+        params.append(camera)
+    if date_from:
+        query += " AND time >= ?"
+        params.append(date_from)
+    if date_to:
+        query += " AND time <= ?"
+        params.append(date_to)
+    query += " ORDER BY id DESC LIMIT ?"
+    params.append(limit)
+    with get_conn() as conn:
+        rows = conn.execute(query, params).fetchall()
+    recordings = [dict(row) for row in rows]
+    for item in recordings:
+        name = quote(str(item["teldrive_video_name"]), safe="")
+        item["video_url"] = f"/api/teldrive/file/{item['teldrive_video_id']}/{name}"
+    return recordings
 
 
 def get_events_total(ai_result: str | None = None, camera: str | None = None) -> int:
