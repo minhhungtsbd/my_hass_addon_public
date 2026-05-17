@@ -75,6 +75,14 @@ DATA_DIR.mkdir(parents=True, exist_ok=True)
 db.EVENT_IMAGES_DIR.mkdir(parents=True, exist_ok=True)
 app.mount("/api/event-image", StaticFiles(directory=str(db.EVENT_IMAGES_DIR)), name="event-image")
 
+@app.get("/favicon.ico")
+async def favicon():
+    svg = '''<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">
+        <rect width="100" height="100" rx="20" fill="#12a9f5"/>
+        <text x="50" y="70" font-size="65" font-family="Arial" fill="#fff" text-anchor="middle">🛡️</text>
+    </svg>'''
+    return Response(content=svg, media_type="image/svg+xml")
+
 # ──────────────────────────────────────────────
 # UI Routes
 # ──────────────────────────────────────────────
@@ -89,6 +97,7 @@ async def login(
     response: Response,
     username: str = Form(...),
     password: str = Form(...),
+    remember: bool = Form(False),
 ):
     user = db.get_user(username)
     if not user or not auth.verify_password(password, str(user["password_hash"])):
@@ -97,13 +106,15 @@ async def login(
             {"request": request, "error": "Sai tài khoản hoặc mật khẩu.", "username": username},
             status_code=status.HTTP_401_UNAUTHORIZED,
         )
-    token = auth.create_token(username)
+    
+    expire_hours = 24 * 30 if remember else 8
+    token = auth.create_token(username, expire_hours=expire_hours)
     response = RedirectResponse(url="/", status_code=status.HTTP_302_FOUND)
     response.set_cookie(
         key="session",
         value=token,
         httponly=True,
-        max_age=8 * 3600,
+        max_age=expire_hours * 3600,
         samesite="lax",
     )
     return response

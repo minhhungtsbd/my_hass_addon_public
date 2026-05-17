@@ -4,6 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Đăng nhập — Fall Detection</title>
+  <link rel="icon" type="image/svg+xml" href="/favicon.ico">
   <style>
     @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap');
     :root {
@@ -105,6 +106,20 @@
       border-color: var(--accent);
       box-shadow: 0 0 0 3px rgba(18,169,245,.14);
     }
+    .checkbox-wrap {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin-bottom: 18px;
+      font-size: 13px;
+      color: var(--muted);
+      cursor: pointer;
+    }
+    .checkbox-wrap input {
+      margin: 0;
+      accent-color: var(--accent);
+      cursor: pointer;
+    }
     button[type=submit] {
       width: 100%;
       padding: 13px;
@@ -169,6 +184,11 @@
       <label for="password">Mật khẩu</label>
       <input id="password" name="password" type="password" autocomplete="current-password"
              placeholder="••••••••" required>
+
+      <label class="checkbox-wrap">
+        <input type="checkbox" name="remember" value="true">
+        Lưu đăng nhập hạn 30d
+      </label>
 
       <button type="submit">Đăng nhập →</button>
     </form>
