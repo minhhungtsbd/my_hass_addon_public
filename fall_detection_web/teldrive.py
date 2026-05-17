@@ -74,6 +74,10 @@ def remote_folder(config: dict[str, Any], camera_name: str, kind: str) -> str:
     return f"{root}/{_clean_segment(camera_name)}/{kind}"
 
 
+def _folder_path(folder: str) -> str:
+    return "/" + folder.strip("/") + "/"
+
+
 def ensure_folder(config: dict[str, Any], folder: str) -> None:
     response = _session.post(
         f"{_api_base(config)}/files/mkdir",
@@ -117,22 +121,37 @@ def upload_file(config: dict[str, Any], local_path: Path, folder: str, file_name
             timeout=180,
         )
     upload_response.raise_for_status()
-    part = upload_response.json()
+    uploaded_part = upload_response.json()
+
+    parts_response = _session.get(
+        f"{_api_base(config)}/uploads/{upload_id}",
+        headers=_headers(config),
+        timeout=30,
+    )
+    parts_response.raise_for_status()
+    uploaded_parts = parts_response.json()
+    if not uploaded_parts:
+        uploaded_parts = [uploaded_part]
+
+    parts = []
+    for part in sorted(uploaded_parts, key=lambda item: int(item.get("partNo", 1))):
+        file_part: dict[str, Any] = {"id": int(part["partId"])}
+        if part.get("salt"):
+            file_part["salt"] = part["salt"]
+        parts.append(file_part)
 
     file_payload: dict[str, Any] = {
         "name": file_name,
         "type": "file",
-        "path": f"{folder.rstrip('/')}/{file_name}",
+        "path": _folder_path(folder),
         "mimeType": mime_type,
         "uploadId": upload_id,
-        "parts": [{"id": part["partId"]}],
+        "parts": parts,
         "size": size,
-        "encrypted": bool(part.get("encrypted", False)),
+        "encrypted": bool(uploaded_part.get("encrypted", False)),
     }
     if channel_id:
         file_payload["channelId"] = int(channel_id)
-    if part.get("salt"):
-        file_payload["parts"][0]["salt"] = part["salt"]
 
     file_response = _session.post(
         f"{_api_base(config)}/files",
@@ -140,7 +159,11 @@ def upload_file(config: dict[str, Any], local_path: Path, folder: str, file_name
         json=file_payload,
         timeout=30,
     )
-    file_response.raise_for_status()
+    try:
+        file_response.raise_for_status()
+    except requests.HTTPError:
+        logger.error("[TELDRIVE] file commit failed status=%s body=%s", file_response.status_code, file_response.text[:500])
+        raise
     logger.info("[TELDRIVE] uploaded %s to %s", file_name, folder)
     return file_response.json()
 

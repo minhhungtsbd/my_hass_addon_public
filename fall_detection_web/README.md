@@ -194,7 +194,8 @@ Luồng upload:
 
 1. Tạo thư mục bằng `POST /api/files/mkdir`
 2. Upload file part bằng `POST /api/uploads/{upload_id}`
-3. Tạo file metadata bằng `POST /api/files`
+3. Đọc lại part bằng `GET /api/uploads/{upload_id}`
+4. Tạo file metadata bằng `POST /api/files`, trong đó `path` là thư mục cha và `name` là tên file
 
 Mặc định app dùng `https://teldrive.minhhungtsbd.me` và lưu theo cấu trúc:
 
