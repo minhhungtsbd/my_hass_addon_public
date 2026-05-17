@@ -78,6 +78,18 @@ def _folder_path(folder: str) -> str:
     return "/" + folder.strip("/") + "/"
 
 
+def _mime_type(file_name: str) -> str:
+    suffix = Path(file_name).suffix.lower()
+    explicit = {
+        ".mp4": "video/mp4",
+        ".avi": "video/x-msvideo",
+        ".jpg": "image/jpeg",
+        ".jpeg": "image/jpeg",
+        ".png": "image/png",
+    }
+    return explicit.get(suffix) or mimetypes.guess_type(file_name)[0] or "application/octet-stream"
+
+
 def ensure_folder(config: dict[str, Any], folder: str) -> None:
     response = _session.post(
         f"{_api_base(config)}/files/mkdir",
@@ -99,7 +111,7 @@ def upload_file(config: dict[str, Any], local_path: Path, folder: str, file_name
     file_name = file_name or local_path.name
     upload_id = uuid.uuid4().hex
     size = local_path.stat().st_size
-    mime_type = mimetypes.guess_type(file_name)[0] or "application/octet-stream"
+    mime_type = _mime_type(file_name)
     channel_id = str(config.get("teldrive_channel_id", "")).strip()
 
     params: dict[str, Any] = {
