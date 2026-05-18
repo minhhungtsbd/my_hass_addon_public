@@ -153,6 +153,38 @@
       gap: 8px;
       align-items: center;
     }
+    .settings-section {
+      grid-column: 1 / -1;
+      border-top: 1px solid var(--line);
+      padding-top: 18px;
+      margin-top: 4px;
+    }
+    .settings-section h2 {
+      margin-bottom: 4px;
+    }
+    .settings-section p {
+      max-width: 760px;
+      margin-bottom: 14px;
+    }
+    .teldrive-grid {
+      display: grid;
+      grid-template-columns: minmax(260px, 1fr) minmax(260px, 1fr);
+      gap: 14px;
+      align-items: end;
+    }
+    .toggle-card {
+      min-height: 42px;
+      padding: 12px;
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      background: var(--panel-2);
+    }
+    .settings-actions {
+      justify-content: flex-end;
+      border-top: 1px solid var(--line);
+      padding-top: 14px;
+      margin-top: 18px;
+    }
     .status-pill {
       display: inline-flex;
       align-items: center;
@@ -483,6 +515,8 @@
       main { padding: 14px; }
       header { flex-direction: column; }
       .grid, .cards { grid-template-columns: 1fr; }
+      .teldrive-grid { grid-template-columns: 1fr; }
+      .settings-actions { justify-content: flex-start; }
       .live-grid.cols-2,
       .live-grid.cols-3 { grid-template-columns: 1fr; }
       .summary-item { grid-template-columns: 1fr; }
@@ -584,8 +618,8 @@
         <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 14px;">
           <h2>Cameras</h2>
           <div class="actions">
-            <button id="addCameraBtn" class="primary" type="button">Add Camera</button>
-            <button id="saveCamerasBtn" class="primary hidden" type="button">Save Cameras</button>
+            <button id="addCameraBtn" class="primary" type="button">Thêm camera</button>
+            <button id="saveCamerasBtn" class="primary hidden" type="button">Lưu camera</button>
             <span id="cameraStatus"></span>
           </div>
         </div>
@@ -613,8 +647,8 @@
         <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 14px;">
           <h2>AI Prompts</h2>
           <div class="actions">
-            <button id="addPromptBtn" class="primary" type="button">Add Prompt</button>
-            <button id="savePromptsBtn" class="primary hidden" type="button">Save Prompts</button>
+            <button id="addPromptBtn" class="primary" type="button">Thêm prompt</button>
+            <button id="savePromptsBtn" class="primary hidden" type="button">Lưu prompt</button>
             <span id="promptStatus"></span>
           </div>
         </div>
@@ -651,48 +685,48 @@
 
     <section id="settingsPanel" class="tab-panel hidden">
       <div class="panel">
-        <h2>Settings</h2>
+        <h2>Cài đặt</h2>
         <div class="grid">
           <div>
-            <label for="ai_base_url">AI Base URL</label>
+            <label for="ai_base_url">URL AI</label>
             <input id="ai_base_url" autocomplete="off" placeholder="https://9router.minhhungtsbd.me/v1">
           </div>
           <div>
-            <label for="go2rtc_url">go2rtc Base URL</label>
+            <label for="go2rtc_url">URL go2rtc</label>
             <input id="go2rtc_url" autocomplete="off" placeholder="http://127.0.0.1:1984">
           </div>
           <div>
-            <label for="vision_model">Vision Model</label>
+            <label for="vision_model">Model Vision</label>
             <input id="vision_model" placeholder="gpt-4o">
           </div>
           <div>
-            <label for="fallback_vision_model">Fallback Vision Model (optional)</label>
+            <label for="fallback_vision_model">Model Vision dự phòng (tùy chọn)</label>
             <input id="fallback_vision_model" placeholder="gpt-4o-mini">
           </div>
           <div style="grid-column: 1 / -1;">
-            <label for="verify_prompt">Verify Prompt (System Prompt)</label>
+            <label for="verify_prompt">Prompt xác minh</label>
             <textarea id="verify_prompt" placeholder="Prompt xác minh té ngã gửi tới AI"></textarea>
           </div>
           <div>
-            <label for="ai_api_key">AI API Key</label>
+            <label for="ai_api_key">API Key AI</label>
             <input id="ai_api_key" type="password" autocomplete="new-password">
           </div>
           <div>
-            <label for="detection_mode">Detection Mode</label>
+            <label for="detection_mode">Kiểu phát hiện</label>
             <select id="detection_mode" disabled>
-              <option value="yolo">YOLO prefilter (Local)</option>
+              <option value="yolo">YOLO local</option>
             </select>
           </div>
           <div>
-            <label for="yolo_model">YOLO Model</label>
+            <label for="yolo_model">Model YOLO</label>
             <input id="yolo_model" autocomplete="off" placeholder="yolov8n.pt">
           </div>
           <div>
-            <label for="yolo_imgsz">YOLO Image Size</label>
+            <label for="yolo_imgsz">Kích thước ảnh YOLO</label>
             <input id="yolo_imgsz" type="number" min="160" step="32" placeholder="416">
           </div>
           <div>
-            <label for="confidence">YOLO Confidence</label>
+            <label for="confidence">Ngưỡng YOLO</label>
             <input id="confidence" type="number" min="0.01" max="1" step="0.01">
           </div>
           <div>
@@ -704,67 +738,70 @@
             <input id="telegram_chat_id" autocomplete="off">
           </div>
           <div>
-            <label for="verify_interval">Verify Interval (seconds)</label>
+            <label for="verify_interval">Khoảng cách xác minh (giây)</label>
             <input id="verify_interval" type="number" min="1">
           </div>
           <div>
-            <label for="alert_cooldown">Alert Cooldown (seconds)</label>
+            <label for="alert_cooldown">Cooldown cảnh báo (giây)</label>
             <input id="alert_cooldown" type="number" min="1">
           </div>
           <div>
-            <label for="frame_skip">Frame Skip</label>
+            <label for="frame_skip">Bỏ qua frame</label>
             <input id="frame_skip" type="number" min="1">
           </div>
           <div>
-            <label for="loop_sleep">Loop Sleep (seconds)</label>
+            <label for="loop_sleep">Nghỉ mỗi vòng lặp (giây)</label>
             <input id="loop_sleep" type="number" min="0" step="0.1">
           </div>
-          <div class="full">
-            <h2 style="margin-top: 10px;">Teldrive Storage</h2>
-          </div>
-          <label class="checkbox-wrap">
-            <input id="teldrive_enabled" type="checkbox">
-            Enable Teldrive upload
-          </label>
-          <div>
-            <label for="teldrive_base_url">Teldrive Base URL</label>
-            <input id="teldrive_base_url" autocomplete="off" placeholder="https://teldrive.minhhungtsbd.me">
-          </div>
-          <div>
-            <label for="teldrive_token">Teldrive Token</label>
-            <input id="teldrive_token" type="password" autocomplete="new-password">
-          </div>
-          <div>
-            <label for="teldrive_root_path">Teldrive Root Path</label>
-            <input id="teldrive_root_path" autocomplete="off" placeholder="/Fall Detection">
-          </div>
-          <div>
-            <label for="teldrive_channel_id">Teldrive Channel ID (optional)</label>
-            <input id="teldrive_channel_id" autocomplete="off">
+          <div class="settings-section">
+            <h2>Lưu trữ Teldrive</h2>
+            <p>Công tắc này bật/tắt toàn bộ kết nối Teldrive. Tùy chọn upload ảnh và ghi video vẫn được cấu hình riêng trong từng camera.</p>
+            <div class="teldrive-grid">
+              <label class="checkbox-wrap toggle-card">
+                <input id="teldrive_enabled" type="checkbox">
+                Bật Teldrive toàn cục
+              </label>
+              <div>
+                <label for="teldrive_base_url">URL Teldrive</label>
+                <input id="teldrive_base_url" autocomplete="off" placeholder="https://teldrive.minhhungtsbd.me">
+              </div>
+              <div>
+                <label for="teldrive_token">Token Teldrive</label>
+                <input id="teldrive_token" type="password" autocomplete="new-password">
+              </div>
+              <div>
+                <label for="teldrive_root_path">Thư mục gốc Teldrive</label>
+                <input id="teldrive_root_path" autocomplete="off" placeholder="/Fall Detection">
+              </div>
+              <div>
+                <label for="teldrive_channel_id">Channel ID Teldrive (tùy chọn)</label>
+                <input id="teldrive_channel_id" autocomplete="off">
+              </div>
+            </div>
           </div>
         </div>
-        <div class="actions" style="margin-top:14px">
-          <button id="saveConfigBtn" class="primary" type="button">Save Settings</button>
-          <button id="reloadConfigBtn" type="button">Reload</button>
-          <button id="checkTeldriveBtn" type="button">Check Teldrive Token</button>
+        <div class="actions settings-actions">
+          <button id="saveConfigBtn" class="primary" type="button">Lưu cài đặt</button>
+          <button id="reloadConfigBtn" type="button">Tải lại</button>
+          <button id="checkTeldriveBtn" type="button">Kiểm tra Token Teldrive</button>
           <span id="configStatus"></span>
         </div>
         <p id="teldriveTokenStatus"></p>
       </div>
       <div class="panel" style="margin-top: 18px;">
-        <h2>Admin Credentials</h2>
+        <h2>Tài khoản quản trị</h2>
         <div class="grid">
           <div>
-            <label for="admin_username">New Username</label>
+            <label for="admin_username">Tên đăng nhập mới</label>
             <input id="admin_username" autocomplete="off" placeholder="admin">
           </div>
           <div>
-            <label for="admin_password">New Password</label>
+            <label for="admin_password">Mật khẩu mới</label>
             <input id="admin_password" type="password" autocomplete="new-password" placeholder="••••••••">
           </div>
         </div>
         <div class="actions" style="margin-top:14px">
-          <button id="saveCredentialsBtn" class="primary" type="button">Update Credentials</button>
+          <button id="saveCredentialsBtn" class="primary" type="button">Cập nhật tài khoản</button>
           <span id="credStatus"></span>
         </div>
       </div>
@@ -848,13 +885,13 @@
     </dialog>
 
     <dialog id="cameraModal" style="padding: 24px; border: 1px solid var(--line); border-radius: 8px; background: var(--panel); color: var(--text); width: 100%; max-width: 500px;">
-      <h2 id="cameraModalTitle" style="margin-bottom: 16px;">Add Camera</h2>
+      <h2 id="cameraModalTitle" style="margin-bottom: 16px;">Thêm camera</h2>
       <div class="grid" style="grid-template-columns: 1fr;">
         <label style="display: flex; align-items: center; gap: 8px; font-weight: bold;">
-          <input type="checkbox" id="modalCamEnabled" checked> Enabled
+          <input type="checkbox" id="modalCamEnabled" checked> Bật camera
         </label>
         <div>
-          <label>Name</label>
+          <label>Tên camera</label>
           <input id="modalCamName" type="text" autocomplete="off" placeholder="bep_sub">
         </div>
         <div>
@@ -866,54 +903,54 @@
           <input id="modalCamGo2rtc" type="text" autocomplete="off" placeholder="bep_sub">
         </div>
         <div>
-          <label>Live URL (Optional)</label>
+          <label>Live URL (tùy chọn)</label>
           <input id="modalCamLive" type="text" autocomplete="off" placeholder="http://10.10.0.2:1984/stream.html?src=bep_sub">
         </div>
         <label class="checkbox-wrap">
-          <input id="modalCamUploadImages" type="checkbox" checked> Upload event images
+          <input id="modalCamUploadImages" type="checkbox" checked> Upload ảnh event lên Teldrive
         </label>
         <label class="checkbox-wrap">
-          <input id="modalCamSaveImages" type="checkbox" checked> Save event images locally
+          <input id="modalCamSaveImages" type="checkbox" checked> Lưu ảnh event vào máy chủ
         </label>
         <label class="checkbox-wrap">
-          <input id="modalCamRecordVideo" type="checkbox"> Record/upload video on person detection
+          <input id="modalCamRecordVideo" type="checkbox"> Ghi/upload video khi phát hiện người
         </label>
         <div>
-          <label>Record Seconds</label>
+          <label>Thời lượng ghi (giây)</label>
           <input id="modalCamRecordSeconds" type="number" min="1" value="10">
         </div>
         <div>
-          <label>Record Cooldown (seconds)</label>
+          <label>Cooldown ghi hình (giây)</label>
           <input id="modalCamRecordCooldown" type="number" min="1" value="300">
         </div>
         <div>
-          <label>AI Prompt</label>
+          <label>Prompt AI</label>
           <select id="modalCamPrompt">
-            <option value="">Global Fallback (Default)</option>
+            <option value="">Dùng prompt mặc định</option>
           </select>
         </div>
       </div>
       <div style="display: flex; gap: 12px; margin-top: 24px; justify-content: flex-end;">
-        <button id="modalCamCancelBtn" type="button">Cancel</button>
-        <button id="modalCamSaveBtn" class="primary" type="button">Save</button>
+        <button id="modalCamCancelBtn" type="button">Hủy</button>
+        <button id="modalCamSaveBtn" class="primary" type="button">Lưu</button>
       </div>
     </dialog>
 
     <dialog id="promptModal" style="padding: 24px; border: 1px solid var(--line); border-radius: 8px; background: var(--panel); color: var(--text); width: 100%; max-width: 600px;">
-      <h2 id="promptModalTitle" style="margin-bottom: 16px;">Add Prompt</h2>
+      <h2 id="promptModalTitle" style="margin-bottom: 16px;">Thêm prompt</h2>
       <div class="grid" style="grid-template-columns: 1fr;">
         <div>
-          <label>Title</label>
+          <label>Tiêu đề</label>
           <input id="modalPromptTitle" type="text" autocomplete="off" placeholder="Cổng trước">
         </div>
         <div>
-          <label>Content</label>
+          <label>Nội dung</label>
           <textarea id="modalPromptContent" placeholder="Bạn là hệ thống giám sát..."></textarea>
         </div>
       </div>
       <div style="display: flex; gap: 12px; margin-top: 24px; justify-content: flex-end;">
-        <button id="modalPromptCancelBtn" type="button">Cancel</button>
-        <button id="modalPromptSaveBtn" class="primary" type="button">Save</button>
+        <button id="modalPromptCancelBtn" type="button">Hủy</button>
+        <button id="modalPromptSaveBtn" class="primary" type="button">Lưu</button>
       </div>
     </dialog>
     <div id="toastStack" class="toast-stack" aria-live="polite" aria-atomic="true"></div>
@@ -1402,7 +1439,7 @@
       });
       // Populate prompt dropdown in camera modal
       const select = document.getElementById("modalCamPrompt");
-      select.innerHTML = '<option value="">Global Fallback (Default)</option>';
+      select.innerHTML = '<option value="">Dùng prompt mặc định</option>';
       prompts.forEach(p => {
         const opt = document.createElement("option");
         opt.value = p.id;
@@ -1414,7 +1451,7 @@
     function openPromptModal(id = null) {
       editingPromptId = id;
       const modal = document.getElementById("promptModal");
-      document.getElementById("promptModalTitle").textContent = id ? "Edit Prompt" : "Add Prompt";
+      document.getElementById("promptModalTitle").textContent = id ? "Sửa prompt" : "Thêm prompt";
       
       let p = prompts.find(x => x.id === id) || {title: "", content: ""};
       document.getElementById("modalPromptTitle").value = p.title;
@@ -1428,7 +1465,7 @@
       const title = document.getElementById("modalPromptTitle").value.trim();
       const content = document.getElementById("modalPromptContent").value.trim();
       if (!title || !content) {
-        showToast("Title and content are required", "warn");
+        showToast("Cần nhập tiêu đề và nội dung", "warn");
         return;
       }
       
@@ -1449,7 +1486,7 @@
       cameras = cameras.map(normalizeCamera);
       cameras.forEach((camera, index) => {
         const promptObj = prompts.find(p => p.id === camera.prompt_id);
-        const promptName = promptObj ? promptObj.title : "Global Fallback";
+        const promptName = promptObj ? promptObj.title : "Prompt mặc định";
         
         const tr = document.createElement("tr");
         tr.style.borderBottom = "1px solid var(--line)";
@@ -1546,7 +1583,7 @@
     function openCameraModal(index = -1) {
       editingCameraIndex = index;
       const modal = document.getElementById("cameraModal");
-      document.getElementById("cameraModalTitle").textContent = index >= 0 ? "Edit Camera" : "Add Camera";
+      document.getElementById("cameraModalTitle").textContent = index >= 0 ? "Sửa camera" : "Thêm camera";
       
       const cam = index >= 0 ? cameras[index] : {enabled: true, name: "", rtsp_url: "", go2rtc_src: "", live_url: "", prompt_id: "", local_save_images: true, teldrive_upload_images: true, teldrive_record_enabled: false, record_seconds: 10, record_cooldown: 300};
       document.getElementById("modalCamEnabled").checked = cam.enabled;
@@ -1580,7 +1617,7 @@
         record_cooldown: Math.max(1, Number(document.getElementById("modalCamRecordCooldown").value || 300))
       };
       if (!cam.name && !cam.rtsp_url) {
-        showToast("Name or RTSP URL is required", "warn");
+        showToast("Cần nhập tên camera hoặc RTSP URL", "warn");
         return;
       }
       
