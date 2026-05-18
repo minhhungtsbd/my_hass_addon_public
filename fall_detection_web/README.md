@@ -177,6 +177,7 @@ Camera được cấu hình trong tab **Cameras**. Mỗi camera gồm:
 | RTSP URL | URL RTSP để YOLO capture frame |
 | go2rtc src | Tên stream trong go2rtc (cho snapshot JPEG và live view) |
 | Live URL | (Tùy chọn) URL stream trực tiếp thay vì tự build từ go2rtc_src |
+| Save event images locally | Lưu ảnh event vào `data/event_images/` cho camera này |
 | Upload event images | Upload ảnh event của camera này lên Teldrive |
 | Record/upload video | Ghi và upload clip ngắn khi camera này phát hiện `person` |
 

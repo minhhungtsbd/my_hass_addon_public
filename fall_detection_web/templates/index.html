@@ -187,14 +187,16 @@
     .card b { display: block; font-size: 18px; margin-top: 4px; }
     .recording-grid {
       display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+      grid-template-columns: repeat(auto-fill, minmax(320px, 460px));
       gap: 14px;
+      align-items: start;
     }
     .recording-card {
       border: 1px solid var(--line);
       border-radius: 8px;
       background: var(--panel-2);
       overflow: hidden;
+      max-width: 460px;
     }
     .recording-video {
       width: 100%;
@@ -879,6 +881,9 @@
           <input id="modalCamUploadImages" type="checkbox" checked> Upload event images
         </label>
         <label class="checkbox-wrap">
+          <input id="modalCamSaveImages" type="checkbox" checked> Save event images locally
+        </label>
+        <label class="checkbox-wrap">
           <input id="modalCamRecordVideo" type="checkbox"> Record/upload video on person detection
         </label>
         <div>
@@ -1284,7 +1289,7 @@
         video.setAttribute("crossorigin", "use-credentials");
         const note = document.createElement("div");
         note.className = "recording-note";
-        note.textContent = "Browser preview depends on the uploaded codec.";
+        note.textContent = "Preview requires a browser-compatible MP4 codec.";
         video.addEventListener("error", () => {
           note.textContent = "This clip cannot be decoded by the browser. Open or download it instead.";
         });
@@ -1336,6 +1341,7 @@
         go2rtc_src: camera.go2rtc_src || "",
         live_url: camera.live_url || "",
         prompt_id: camera.prompt_id || "",
+        local_save_images: camera.local_save_images !== false,
         teldrive_upload_images: camera.teldrive_upload_images !== false,
         teldrive_record_enabled: camera.teldrive_record_enabled === true
       };
@@ -1535,13 +1541,14 @@
       const modal = document.getElementById("cameraModal");
       document.getElementById("cameraModalTitle").textContent = index >= 0 ? "Edit Camera" : "Add Camera";
       
-      const cam = index >= 0 ? cameras[index] : {enabled: true, name: "", rtsp_url: "", go2rtc_src: "", live_url: "", prompt_id: "", teldrive_upload_images: true, teldrive_record_enabled: false};
+      const cam = index >= 0 ? cameras[index] : {enabled: true, name: "", rtsp_url: "", go2rtc_src: "", live_url: "", prompt_id: "", local_save_images: true, teldrive_upload_images: true, teldrive_record_enabled: false};
       document.getElementById("modalCamEnabled").checked = cam.enabled;
       document.getElementById("modalCamName").value = cam.name;
       document.getElementById("modalCamRtsp").value = cam.rtsp_url;
       document.getElementById("modalCamGo2rtc").value = cam.go2rtc_src;
       document.getElementById("modalCamLive").value = cam.live_url;
       document.getElementById("modalCamPrompt").value = cam.prompt_id || "";
+      document.getElementById("modalCamSaveImages").checked = cam.local_save_images !== false;
       document.getElementById("modalCamUploadImages").checked = cam.teldrive_upload_images !== false;
       document.getElementById("modalCamRecordVideo").checked = cam.teldrive_record_enabled === true;
       modal.showModal();
@@ -1557,6 +1564,7 @@
         go2rtc_src: document.getElementById("modalCamGo2rtc").value.trim(),
         live_url: document.getElementById("modalCamLive").value.trim(),
         prompt_id: document.getElementById("modalCamPrompt").value,
+        local_save_images: document.getElementById("modalCamSaveImages").checked,
         teldrive_upload_images: document.getElementById("modalCamUploadImages").checked,
         teldrive_record_enabled: document.getElementById("modalCamRecordVideo").checked
       };

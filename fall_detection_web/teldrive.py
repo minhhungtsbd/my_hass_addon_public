@@ -181,8 +181,8 @@ def upload_file(config: dict[str, Any], local_path: Path, folder: str, file_name
     return file_response.json()
 
 
-def upload_event_image(config: dict[str, Any], local_path: Path, camera_name: str) -> dict[str, Any]:
-    return upload_file(config, local_path, remote_folder(config, camera_name, "images"))
+def upload_event_image(config: dict[str, Any], local_path: Path, camera_name: str, file_name: str | None = None) -> dict[str, Any]:
+    return upload_file(config, local_path, remote_folder(config, camera_name, "images"), file_name=file_name)
 
 
 def upload_event_video(config: dict[str, Any], local_path: Path, camera_name: str) -> dict[str, Any]:

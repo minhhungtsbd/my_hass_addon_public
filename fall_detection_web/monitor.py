@@ -73,22 +73,25 @@ def capture_rtsp_snapshot(rtsp_url: str, output_path: Path) -> Path:
 
 
 def log_event(config: dict[str, Any], status_name: str, image_path: Path | None = None, camera_config: dict[str, Any] | None = None, **fields: Any) -> None:
-    event = insert_event(status_name, image_path=image_path, **fields)
+    save_local_images = True if camera_config is None else camera_config.get("local_save_images") is not False
+    event = insert_event(status_name, image_path=image_path, save_image=save_local_images, **fields)
     image_file = str(event.get("image_file", ""))
     upload_images = True if camera_config is None else camera_config.get("teldrive_upload_images") is not False
-    if image_file and upload_images and teldrive.enabled(config):
+    upload_path = DATA_DIR / "event_images" / image_file if image_file else image_path
+    if upload_path and upload_path.exists() and upload_images and teldrive.enabled(config):
         camera_name = str(fields.get("camera", "Camera") or "Camera")
-        stored_path = DATA_DIR / "event_images" / image_file
+        safe_status = "".join(ch for ch in status_name if ch.isalnum() or ch in ("_", "-")) or "event"
+        upload_name = image_file or f"{time.strftime('%Y%m%dT%H%M%S')}_{safe_status}.jpg"
         threading.Thread(
             target=upload_event_image_safe,
-            args=(config.copy(), stored_path, camera_name, int(event["id"])),
+            args=(config.copy(), upload_path, camera_name, int(event["id"]), upload_name),
             daemon=True,
         ).start()
 
 
-def upload_event_image_safe(config: dict[str, Any], image_path: Path, camera_name: str, event_id: int) -> None:
+def upload_event_image_safe(config: dict[str, Any], image_path: Path, camera_name: str, event_id: int, file_name: str | None = None) -> None:
     try:
-        file_data = teldrive.upload_event_image(config, image_path, camera_name)
+        file_data = teldrive.upload_event_image(config, image_path, camera_name, file_name=file_name)
         if file_data:
             import db
             db.update_event_teldrive_image(event_id, file_data)
