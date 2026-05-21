@@ -371,9 +371,11 @@
       gap: 12px;
     }
     .camera-list-card {
-      grid-template-columns: 220px minmax(0, 1fr);
+      grid-template-columns: 220px minmax(0, max-content);
       align-items: start;
       gap: 14px;
+      width: fit-content;
+      max-width: 100%;
     }
     .camera-card-main {
       min-width: 0;
@@ -383,7 +385,7 @@
       justify-content: space-between;
       gap: 10px;
     }
-    .camera-title { display: flex; justify-content: space-between; gap: 10px; align-items: flex-start; }
+    .camera-title { display: block; }
     .camera-open { cursor: pointer; border-radius: var(--radius); }
     .camera-open:focus-visible { outline: 3px solid rgba(34, 197, 94, .22); outline-offset: 4px; }
     .camera-title h3 { font-size: 14px; }
@@ -414,7 +416,7 @@
     }
     .camera-meta-stack {
       display: grid;
-      grid-template-columns: repeat(2, minmax(140px, 240px));
+      grid-template-columns: repeat(2, minmax(112px, 178px));
       gap: 8px;
       align-items: center;
     }
@@ -425,6 +427,12 @@
       min-height: 32px;
       overflow: hidden;
       text-overflow: ellipsis;
+    }
+    .camera-actions-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
     }
 
     .live-toolbar { margin-bottom: 14px; }
@@ -1451,19 +1459,21 @@
                 <h3>${esc(cameraName(camera, index))}</h3>
                 <p>${esc(camera.rtsp_url || camera.go2rtc_src || camera.live_url || "No source configured")}</p>
               </div>
-              <span class="badge ${camera.enabled ? "good" : "bad"}">${camera.enabled ? "Enabled" : "Disabled"}</span>
             </div>
             <div class="camera-meta-stack">
               <span class="badge">Prompt: ${esc(promptTitle(camera.prompt_id))}</span>
               <span class="badge ${camera.teldrive_record_enabled ? "info" : ""}">Record: ${camera.teldrive_record_enabled ? "On" : "Off"}</span>
             </div>
-            <div class="actions">
-              <button class="btn small camera-open-btn" data-index="${index}" type="button">Open detail</button>
-              <button class="btn small camera-toggle" data-index="${index}" type="button">${camera.enabled ? "Disable" : "Enable"}</button>
-              <button class="btn small camera-snapshot" data-index="${index}" type="button">Snapshot</button>
-              <button class="btn small camera-test" data-index="${index}" type="button">Test AI</button>
-              <button class="btn small camera-edit" data-index="${index}" type="button">Edit</button>
-              <button class="btn small danger camera-delete" data-index="${index}" type="button">Delete</button>
+            <div class="camera-actions-row">
+              <div class="actions">
+                <button class="btn small camera-open-btn" data-index="${index}" type="button">Open detail</button>
+                <button class="btn small camera-toggle" data-index="${index}" type="button">${camera.enabled ? "Disable" : "Enable"}</button>
+                <button class="btn small camera-snapshot" data-index="${index}" type="button">Snapshot</button>
+                <button class="btn small camera-test" data-index="${index}" type="button">Test AI</button>
+                <button class="btn small camera-edit" data-index="${index}" type="button">Edit</button>
+                <button class="btn small danger camera-delete" data-index="${index}" type="button">Delete</button>
+              </div>
+              <span class="badge ${camera.enabled ? "good" : "bad"}">${camera.enabled ? "Enabled" : "Disabled"}</span>
             </div>
           </div>
         </article>
