@@ -91,7 +91,7 @@ async def favicon():
 
 @app.get("/login", response_class=HTMLResponse)
 async def login_page(request: Request):
-    return templates.TemplateResponse("login.html", {"request": request})
+    return templates.TemplateResponse(request=request, name="login.html", context={})
 
 @app.post("/auth/login")
 async def login(
@@ -104,8 +104,9 @@ async def login(
     user = db.get_user(username)
     if not user or not auth.verify_password(password, str(user["password_hash"])):
         return templates.TemplateResponse(
-            "login.html",
-            {"request": request, "error": "Invalid username or password.", "username": username},
+            request=request,
+            name="login.html",
+            context={"error": "Invalid username or password.", "username": username},
             status_code=status.HTTP_401_UNAUTHORIZED,
         )
     
@@ -129,7 +130,7 @@ async def logout():
 
 @app.get("/", response_class=HTMLResponse)
 async def index_page(request: Request, _: str = Depends(auth.require_auth)):
-    return templates.TemplateResponse("index.html", {"request": request})
+    return templates.TemplateResponse(request=request, name="index.html", context={})
 
 
 @app.get("/api/event-image/{filename}")
