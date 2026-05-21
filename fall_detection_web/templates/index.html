@@ -371,7 +371,7 @@
       gap: 12px;
     }
     .camera-list-card {
-      grid-template-columns: 220px minmax(0, max-content) max-content;
+      grid-template-columns: 220px minmax(0, max-content);
       align-items: start;
       gap: 14px;
       width: fit-content;
@@ -432,14 +432,6 @@
       display: flex;
       align-items: center;
       justify-content: flex-start;
-      gap: 12px;
-    }
-    .camera-status-col {
-      min-height: 124px;
-      display: flex;
-      flex-direction: column;
-      align-items: flex-end;
-      justify-content: space-between;
       gap: 12px;
     }
 
@@ -583,10 +575,6 @@
       .camera-list-card { grid-template-columns: 1fr; }
       .camera-card-main { min-height: auto; }
       .camera-meta-stack { grid-template-columns: 1fr; }
-      .camera-status-col {
-        min-height: auto;
-        align-items: stretch;
-      }
       .span-2, .span-3 { grid-column: auto; }
       .top-actions, .actions, .split { align-items: stretch; flex-direction: column; }
       .btn, .status-chip { width: 100%; }
@@ -1483,12 +1471,10 @@
                 <button class="btn small camera-snapshot" data-index="${index}" type="button">Snapshot</button>
                 <button class="btn small camera-test" data-index="${index}" type="button">Test AI</button>
                 <button class="btn small camera-edit" data-index="${index}" type="button">Edit</button>
+                <button class="btn small danger camera-delete" data-index="${index}" type="button">Delete</button>
+                <span class="badge ${camera.enabled ? "good" : "bad"}">${camera.enabled ? "Enabled" : "Disabled"}</span>
               </div>
             </div>
-          </div>
-          <div class="camera-status-col">
-            <span class="badge ${camera.enabled ? "good" : "bad"}">${camera.enabled ? "Enabled" : "Disabled"}</span>
-            <button class="btn small danger camera-delete" data-index="${index}" type="button">Delete</button>
           </div>
         </article>
       `).join("");
