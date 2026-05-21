@@ -403,6 +403,27 @@
       background: #000;
       object-fit: contain;
     }
+    .detail-live {
+      display: grid;
+      grid-template-columns: minmax(320px, 860px) minmax(220px, 1fr);
+      gap: 14px;
+      align-items: stretch;
+    }
+    .detail-live .live-card iframe,
+    .detail-live .live-card img {
+      height: min(42vh, 420px);
+      min-height: 240px;
+      aspect-ratio: auto;
+    }
+    .detail-side {
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      background: rgba(2, 6, 23, .24);
+      padding: 14px;
+      display: grid;
+      align-content: start;
+      gap: 10px;
+    }
 
     .event-thumb {
       width: 92px;
@@ -491,6 +512,7 @@
       .topbar { position: static; margin: -14px -14px 14px; padding: 14px; align-items: stretch; flex-direction: column; }
       .nav { grid-template-columns: repeat(2, minmax(0, 1fr)); }
       .cols-4, .cols-3, .cols-2, .form-grid, .form-grid.three, .live-grid.cols-2, .live-grid.cols-3 { grid-template-columns: 1fr; }
+      .detail-live { grid-template-columns: 1fr; }
       .span-2, .span-3 { grid-column: auto; }
       .top-actions, .actions, .split { align-items: stretch; flex-direction: column; }
       .btn, .status-chip { width: 100%; }
@@ -683,7 +705,7 @@
               <button id="detailTestAiBtn" class="btn primary" type="button"><span data-icon="spark"></span>Test AI</button>
             </div>
           </div>
-          <div id="cameraDetailLive" style="margin-top:14px;"></div>
+          <div id="cameraDetailLive" class="detail-live" style="margin-top:14px;"></div>
         </div>
 
         <div class="table-panel">
@@ -740,6 +762,7 @@
                 <option value="24">24 rows</option>
               </select>
               <button id="refreshRecordingsBtn" class="btn" type="button"><span data-icon="refresh"></span>Refresh</button>
+              <button id="clearRecordingsBtn" class="btn danger" type="button"><span data-icon="trash"></span>Clear recordings</button>
             </div>
           </div>
           <div id="recordingsGrid" class="grid cols-2"></div>
@@ -904,6 +927,31 @@
     <div id="viewerBody" class="viewer-body"></div>
   </dialog>
 
+  <dialog id="confirmDialog">
+    <div class="dialog-head">
+      <div>
+        <h3 id="confirmTitle">Confirm action</h3>
+        <p id="confirmMessage" class="muted">This action cannot be undone.</p>
+      </div>
+      <button class="btn small" data-confirm-cancel type="button">Close</button>
+    </div>
+    <div class="dialog-body">
+      <div class="camera-card">
+        <div class="split">
+          <div>
+            <b id="confirmScope">Selected camera</b>
+            <p id="confirmDetail" class="muted">Only matching records will be removed.</p>
+          </div>
+          <span class="badge bad">Destructive</span>
+        </div>
+      </div>
+    </div>
+    <div class="dialog-foot">
+      <button class="btn" data-confirm-cancel type="button">Cancel</button>
+      <button id="confirmActionBtn" class="btn danger" type="button">Confirm</button>
+    </div>
+  </dialog>
+
   <div id="toastStack" class="toast-stack"></div>
 
   <script>
@@ -1001,6 +1049,32 @@
         button.disabled = false;
         if (button.dataset.label) button.innerHTML = button.dataset.label;
       }
+    }
+    function askConfirm({ title, message, scope, detail, actionText = "Confirm" }) {
+      return new Promise(resolve => {
+        const dialog = $("confirmDialog");
+        const action = $("confirmActionBtn");
+        setText("confirmTitle", title);
+        setText("confirmMessage", message);
+        setText("confirmScope", scope);
+        setText("confirmDetail", detail);
+        action.textContent = actionText;
+
+        const cleanup = (answer) => {
+          action.onclick = null;
+          dialog.querySelectorAll("[data-confirm-cancel]").forEach(btn => { btn.onclick = null; });
+          if (dialog.open) dialog.close();
+          resolve(answer);
+        };
+
+        action.onclick = () => cleanup(true);
+        dialog.querySelectorAll("[data-confirm-cancel]").forEach(btn => { btn.onclick = () => cleanup(false); });
+        dialog.oncancel = (event) => {
+          event.preventDefault();
+          cleanup(false);
+        };
+        dialog.showModal();
+      });
     }
 
     async function api(url, options = {}) {
@@ -1279,6 +1353,16 @@
         card.appendChild(empty);
       }
       container.appendChild(card);
+      const side = document.createElement("aside");
+      side.className = "detail-side";
+      side.innerHTML = `
+        <div class="metric-line"><span>Status</span><b>${camera.enabled ? "Enabled" : "Disabled"}</b></div>
+        <div class="metric-line"><span>Prompt</span><b>${esc(promptTitle(camera.prompt_id))}</b></div>
+        <div class="metric-line"><span>Record</span><b>${camera.teldrive_record_enabled ? "On" : "Off"}</b></div>
+        <div class="metric-line"><span>go2rtc</span><b>${esc(camera.go2rtc_src || "-")}</b></div>
+        <div class="metric-line"><span>Live mode</span><b>${esc(source.mode)}</b></div>
+      `;
+      container.appendChild(side);
     }
 
     function renderCameras() {
@@ -1469,7 +1553,13 @@
       if (editCamera) openCameraDialog(Number(editCamera.dataset.index));
 
       const deleteCamera = event.target.closest(".camera-delete");
-      if (deleteCamera && confirm("Delete this camera?")) {
+      if (deleteCamera && await askConfirm({
+        title: "Delete camera",
+        message: "This removes the camera configuration from the web app.",
+        scope: cameraName(state.cameras[Number(deleteCamera.dataset.index)], Number(deleteCamera.dataset.index)),
+        detail: "Events and recordings already stored in the database are not removed.",
+        actionText: "Delete camera"
+      })) {
         const index = Number(deleteCamera.dataset.index);
         state.cameras.splice(index, 1);
         if (state.selectedCameraIndex === index) state.selectedCameraIndex = -1;
@@ -1507,7 +1597,13 @@
       if (editPrompt) openPromptDialog(Number(editPrompt.dataset.index));
 
       const deletePrompt = event.target.closest(".prompt-delete");
-      if (deletePrompt && confirm("Delete this prompt? Cameras using it will fall back to the default prompt.")) {
+      if (deletePrompt && await askConfirm({
+        title: "Delete prompt",
+        message: "Cameras using this prompt will fall back to the default prompt.",
+        scope: state.prompts[Number(deletePrompt.dataset.index)]?.title || "Prompt",
+        detail: "This only removes the prompt template.",
+        actionText: "Delete prompt"
+      })) {
         const removed = state.prompts.splice(Number(deletePrompt.dataset.index), 1)[0];
         state.cameras.forEach(camera => { if (camera.prompt_id === removed.id) camera.prompt_id = ""; });
         await saveConfig("configStatus");
@@ -1653,9 +1749,22 @@
     $("prevPageBtn").addEventListener("click", () => { if (state.eventsPage > 1) { state.eventsPage--; loadEvents(); } });
     $("nextPageBtn").addEventListener("click", () => { state.eventsPage++; loadEvents(); });
     $("clearEventsBtn").addEventListener("click", async () => {
-      if (!confirm("Delete all events?")) return;
+      const index = state.selectedCameraIndex;
+      const camera = index >= 0 ? cameraName(state.cameras[index], index) : $("eventFilterCamera").value;
+      if (!camera) {
+        showToast("Select a camera before clearing events.", "warn");
+        return;
+      }
+      const ok = await askConfirm({
+        title: "Clear camera events",
+        message: "Delete event timeline records for this camera.",
+        scope: camera,
+        detail: "Recordings are not cleared by this action. Use Clear recordings separately.",
+        actionText: "Clear events"
+      });
+      if (!ok) return;
       try {
-        const data = await api("/api/events", { method: "DELETE" });
+        const data = await api(`/api/events?camera=${encodeURIComponent(camera)}`, { method: "DELETE" });
         showToast(data.message || "Events cleared", "ok");
         state.eventsPage = 1;
         await Promise.all([loadEvents(), loadStatus()]);
@@ -1669,6 +1778,28 @@
     $("recordingPageSize").addEventListener("change", () => { state.recordingsPage = 1; loadRecordings(); });
     $("prevRecordingPageBtn").addEventListener("click", () => { if (state.recordingsPage > 1) { state.recordingsPage--; loadRecordings(); } });
     $("nextRecordingPageBtn").addEventListener("click", () => { state.recordingsPage++; loadRecordings(); });
+    $("clearRecordingsBtn").addEventListener("click", async () => {
+      const index = state.selectedCameraIndex;
+      const camera = index >= 0 ? cameraName(state.cameras[index], index) : $("recordingFilterCamera").value;
+      if (!camera) {
+        showToast("Select a camera before clearing recordings.", "warn");
+        return;
+      }
+      const ok = await askConfirm({
+        title: "Clear camera recordings",
+        message: "Delete recording records for this camera.",
+        scope: camera,
+        detail: "Camera events without video are not cleared by this action.",
+        actionText: "Clear recordings"
+      });
+      if (!ok) return;
+      try {
+        const data = await api(`/api/recordings?camera=${encodeURIComponent(camera)}`, { method: "DELETE" });
+        showToast(data.message || "Recordings cleared", "ok");
+        state.recordingsPage = 1;
+        await Promise.all([loadRecordings(), loadStatus()]);
+      } catch (err) { showToast(err.message, "err"); }
+    });
 
     $("testAiBtn").addEventListener("click", async () => {
       const btn = $("testAiBtn");

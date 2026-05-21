@@ -358,9 +358,25 @@ async def get_recordings(
     }
 
 @app.delete("/api/events")
-async def clear_events(_: str = Depends(auth.require_auth)):
-    deleted = db.clear_events()
+async def clear_events(
+    camera: str | None = None,
+    _: str = Depends(auth.require_auth),
+):
+    if camera == "" or camera == "All":
+        camera = None
+    deleted = db.clear_events(camera=camera, exclude_recordings=True)
     return {"success": True, "message": f"Deleted {deleted} events"}
+
+
+@app.delete("/api/recordings")
+async def clear_recordings(
+    camera: str | None = None,
+    _: str = Depends(auth.require_auth),
+):
+    if camera == "" or camera == "All":
+        camera = None
+    deleted = db.clear_events(camera=camera, recordings_only=True)
+    return {"success": True, "message": f"Deleted {deleted} recordings"}
 
 @app.post("/api/capture")
 async def capture(_: str = Depends(auth.require_auth)):

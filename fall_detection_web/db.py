@@ -382,11 +382,32 @@ def count_events() -> int:
         return conn.execute("SELECT COUNT(*) FROM events").fetchone()[0]
 
 
-def clear_events() -> int:
+def clear_events(camera: str | None = None, recordings_only: bool = False, exclude_recordings: bool = False) -> int:
+    conditions = []
+    params: list[Any] = []
+    if camera:
+        conditions.append("camera = ?")
+        params.append(camera)
+    if recordings_only:
+        conditions.append("teldrive_video_id IS NOT NULL AND teldrive_video_id != ''")
+    if exclude_recordings:
+        conditions.append("(teldrive_video_id IS NULL OR teldrive_video_id = '')")
+    where = f" WHERE {' AND '.join(conditions)}" if conditions else ""
+
     with get_conn() as conn:
-        deleted = conn.execute("DELETE FROM events").rowcount
-    # Delete all image files
-    for path in EVENT_IMAGES_DIR.glob("*.jpg"):
+        rows = conn.execute(f"SELECT image_file FROM events{where}", params).fetchall()
+        deleted = conn.execute(f"DELETE FROM events{where}", params).rowcount
+
+        remaining_images = {
+            str(row[0] or "").strip()
+            for row in conn.execute("SELECT image_file FROM events WHERE image_file IS NOT NULL AND image_file != ''").fetchall()
+        }
+
+    for row in rows:
+        image_file = str(row[0] or "").strip()
+        if not image_file or image_file in remaining_images:
+            continue
+        path = EVENT_IMAGES_DIR / image_file
         try:
             path.unlink()
         except OSError:
