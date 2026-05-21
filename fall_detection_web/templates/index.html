@@ -1212,16 +1212,47 @@
     }
 
     function parseViewRoute(value) {
-      const raw = String(value || "dashboard").replace(/^#/, "");
-      const [viewName, ...cameraParts] = raw.split("/");
-      let camera = cameraParts.join("/");
-      if (camera) {
-        try { camera = decodeURIComponent(camera); } catch { /* Keep raw camera route. */ }
+      const raw = String(value || (location.hash || location.pathname)).trim();
+      if (raw.startsWith("#")) {
+        const [viewName, ...cameraParts] = raw.replace(/^#/, "").split("/");
+        let camera = cameraParts.join("/");
+        if (camera) {
+          try { camera = decodeURIComponent(camera); } catch { /* Keep raw camera route. */ }
+        }
+        return { view: viewName || "dashboard", camera };
       }
-      return { view: viewName || "dashboard", camera };
+      if (!raw.startsWith("/")) {
+        const [viewName, ...cameraParts] = raw.split("/");
+        let camera = cameraParts.join("/");
+        if (camera) {
+          try { camera = decodeURIComponent(camera); } catch { /* Keep raw camera route. */ }
+        }
+        return { view: viewName || "dashboard", camera };
+      }
+
+      const path = (raw.split(/[?#]/)[0] || "/").replace(/\/+$/, "") || "/";
+      if (path === "/" || path === "/dashboard") return { view: "dashboard", camera: "" };
+      if (path === "/cameras") return { view: "cameras", camera: "" };
+      if (path === "/prompts") return { view: "prompts", camera: "" };
+      if (path === "/live") return { view: "live", camera: "" };
+      if (path === "/settings") return { view: "settings", camera: "" };
+      if (path === "/tools") return { view: "tools", camera: "" };
+      if (path.startsWith("/camera/")) {
+        let camera = path.slice("/camera/".length);
+        try { camera = decodeURIComponent(camera); } catch { /* Keep raw camera route. */ }
+        return { view: "camera-detail", camera };
+      }
+      if (location.hash) return parseViewRoute(location.hash);
+      return { view: "dashboard", camera: "" };
     }
 
-    function switchView(name) {
+    function viewUrl(name, cameraRoute = "") {
+      if (name === "dashboard") return "/";
+      if (name === "camera-detail") return cameraRoute ? `/camera/${encodeURIComponent(cameraRoute)}` : "/cameras";
+      return `/${name}`;
+    }
+
+    function switchView(name, options = {}) {
       const route = parseViewRoute(name);
       name = route.view;
       if (name === "camera-detail" && route.camera) {
@@ -1235,8 +1266,9 @@
       const cameraRoute = name === "camera-detail"
         ? route.camera || (state.selectedCameraIndex >= 0 ? cameraName(state.cameras[state.selectedCameraIndex], state.selectedCameraIndex) : "")
         : "";
-      const nextHash = cameraRoute ? `#${name}/${encodeURIComponent(cameraRoute)}` : `#${name}`;
-      history.replaceState(null, "", nextHash);
+      const nextUrl = viewUrl(name, cameraRoute);
+      const method = options.push ? "pushState" : "replaceState";
+      if (location.pathname !== nextUrl) history[method](null, "", nextUrl);
       if (name === "live") renderLive();
       if (name === "camera-detail") {
         renderCameraDetail();
@@ -1301,7 +1333,7 @@
       state.config = data.config || {};
       state.cameras = Array.isArray(state.config.cameras) ? state.config.cameras : [];
       state.prompts = Array.isArray(state.config.prompts) ? state.config.prompts : [];
-      const route = parseViewRoute(location.hash || "#dashboard");
+      const route = parseViewRoute();
       if (route.view === "camera-detail" && route.camera) {
         state.selectedCameraIndex = findCameraIndexByRouteName(route.camera);
       }
@@ -1463,7 +1495,7 @@
       const name = cameraName(state.cameras[index], index);
       $("eventFilterCamera").value = name;
       $("recordingFilterCamera").value = name;
-      switchView(`camera-detail/${encodeURIComponent(name)}`);
+      switchView(`/camera/${encodeURIComponent(name)}`, { push: true });
     }
 
     function renderCameraDetail() {
@@ -1694,10 +1726,10 @@
 
     document.addEventListener("click", async event => {
       const nav = event.target.closest(".nav-btn");
-      if (nav) switchView(nav.dataset.view);
+      if (nav) switchView(nav.dataset.view, { push: true });
 
       const openView = event.target.closest("[data-open-view]");
-      if (openView) switchView(openView.dataset.openView);
+      if (openView) switchView(openView.dataset.openView, { push: true });
 
       const closer = event.target.closest("[data-close-dialog]");
       if (closer) $(closer.dataset.closeDialog).close();
@@ -1746,7 +1778,7 @@
           const data = await api(`/api/test-ai-camera?index=${index}`, { method: "POST", timeout: 150000 });
           $("toolResult").textContent = JSON.stringify(data, null, 2);
           showToast(`AI test complete: ${data.result || "done"}`, "ok");
-          switchView("tools");
+          switchView("tools", { push: true });
         } catch (err) {
           showToast(err.message, "err");
         } finally {
@@ -1875,7 +1907,7 @@
     $("captureBtn").addEventListener("click", () => monitorAction("/api/capture", $("captureBtn"), "Snapshot captured"));
     $("refreshBtn").addEventListener("click", async () => {
       await loadStatus();
-      if ((location.hash || "").includes("camera-detail")) await Promise.all([loadEvents().catch(() => {}), loadRecordings().catch(() => {})]);
+      if (parseViewRoute().view === "camera-detail") await Promise.all([loadEvents().catch(() => {}), loadRecordings().catch(() => {})]);
       showToast("Dashboard refreshed", "ok");
     });
     $("testAiQuickBtn").addEventListener("click", () => $("testAiBtn").click());
@@ -2026,14 +2058,15 @@
     $("openViewerBtn").addEventListener("click", () => { if (state.viewerUrl) window.open(state.viewerUrl, "_blank"); });
     $("viewerDialog").addEventListener("close", () => { $("viewerBody").innerHTML = ""; });
 
+    window.addEventListener("popstate", () => switchView());
     window.addEventListener("hashchange", () => switchView(location.hash || "#dashboard"));
 
     (async function init() {
-      switchView(location.hash || "#dashboard");
+      switchView();
       try {
         await loadConfig();
         await loadStatus();
-        if ((location.hash || "").includes("camera-detail")) {
+        if (parseViewRoute().view === "camera-detail") {
           await loadEvents();
           await loadRecordings();
         }
@@ -2042,7 +2075,7 @@
       }
       setInterval(() => loadStatus().catch(() => {}), 5000);
       setInterval(() => {
-        if ((location.hash || "#dashboard").includes("camera-detail")) {
+        if (parseViewRoute().view === "camera-detail") {
           loadEvents().catch(() => {});
         }
       }, 15000);

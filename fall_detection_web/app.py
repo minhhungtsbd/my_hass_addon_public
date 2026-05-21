@@ -133,6 +133,20 @@ async def index_page(request: Request, _: str = Depends(auth.require_auth)):
     return templates.TemplateResponse(request=request, name="index.html", context={})
 
 
+@app.get("/camera/{camera_name:path}", response_class=HTMLResponse)
+async def camera_page(request: Request, camera_name: str, _: str = Depends(auth.require_auth)):
+    if not camera_name.strip():
+        return RedirectResponse(url="/cameras", status_code=status.HTTP_302_FOUND)
+    return templates.TemplateResponse(request=request, name="index.html", context={})
+
+
+@app.get("/{page_name}", response_class=HTMLResponse)
+async def app_page(request: Request, page_name: str, _: str = Depends(auth.require_auth)):
+    if page_name not in {"dashboard", "cameras", "prompts", "live", "settings", "tools"}:
+        raise HTTPException(status_code=404, detail="Page not found")
+    return templates.TemplateResponse(request=request, name="index.html", context={})
+
+
 @app.get("/api/event-image/{filename}")
 async def event_image(request: Request, filename: str, _: str = Depends(auth.require_auth)):
     safe_name = Path(filename).name
