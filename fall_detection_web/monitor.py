@@ -110,7 +110,7 @@ def upload_event_image_safe(config: dict[str, Any], image_path: Path, camera_nam
         insert_event("teldrive_image_error", camera=camera_name, error=str(exc))
 
 
-def upload_event_video_safe(config: dict[str, Any], video_path: Path, camera_name: str) -> None:
+def upload_event_video_safe(config: dict[str, Any], video_path: Path, camera_name: str) -> bool:
     try:
         file_data = teldrive.upload_event_video(config, video_path, camera_name)
         insert_event(
@@ -121,9 +121,24 @@ def upload_event_video_safe(config: dict[str, Any], video_path: Path, camera_nam
             teldrive_video_name=str(file_data.get("name", "")),
             teldrive_video_path=str(file_data.get("path", "")),
         )
+        return True
     except Exception as exc:
         logger.warning("[TELDRIVE] video upload failed camera=%s: %s", camera_name, exc)
         insert_event("teldrive_video_error", camera=camera_name, error=str(exc))
+        return False
+
+
+def cleanup_recording_if_needed(camera: dict[str, Any], video_path: Path, uploaded: bool) -> None:
+    if camera.get("local_save_videos") is not False:
+        return
+    if not uploaded:
+        logger.warning("[RECORD] keeping local clip after upload failure file=%s", video_path.name)
+        return
+    try:
+        video_path.unlink()
+        logger.info("[RECORD] removed local clip after upload file=%s", video_path.name)
+    except OSError as exc:
+        logger.warning("[RECORD] could not remove local clip file=%s error=%s", video_path.name, exc)
 
 
 def safe_camera_name(camera_name: str) -> str:
@@ -219,7 +234,8 @@ def record_and_upload_clip(
         try:
             go2rtc_path = record_go2rtc_clip(config, camera, final_path)
             if go2rtc_path:
-                upload_event_video_safe(config, go2rtc_path, camera_name)
+                uploaded = upload_event_video_safe(config, go2rtc_path, camera_name)
+                cleanup_recording_if_needed(camera, go2rtc_path, uploaded)
                 return
         except Exception as exc:
             logger.warning("[RECORD] go2rtc clip failed camera=%s: %s", camera_name, exc)
@@ -264,7 +280,8 @@ def record_and_upload_clip(
 
     if raw_path and raw_path.exists() and raw_path.stat().st_size > 0:
         video_path = transcode_to_h264_mp4(raw_path, final_path)
-        upload_event_video_safe(config, video_path, camera_name)
+        uploaded = upload_event_video_safe(config, video_path, camera_name)
+        cleanup_recording_if_needed(camera, video_path, uploaded)
 
 
 def capture_snapshot(config: dict[str, Any], output_path: Path = SNAPSHOT_PATH) -> Path:

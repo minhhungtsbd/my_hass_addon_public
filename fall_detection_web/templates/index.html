@@ -375,6 +375,41 @@
     .camera-open:focus-visible { outline: 3px solid rgba(34, 197, 94, .22); outline-offset: 4px; }
     .camera-title h3 { font-size: 14px; }
     .camera-title p { color: var(--muted); margin-top: 4px; word-break: break-all; }
+    .camera-thumb {
+      width: 100%;
+      aspect-ratio: 16 / 9;
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      background:
+        linear-gradient(135deg, rgba(56, 189, 248, .10), rgba(34, 197, 94, .08)),
+        rgba(2, 6, 23, .52);
+      overflow: hidden;
+      position: relative;
+    }
+    .camera-thumb img {
+      width: 100%;
+      height: 100%;
+      display: block;
+      object-fit: cover;
+      background: #000;
+    }
+    .camera-thumb .empty {
+      min-height: 100%;
+      border: 0;
+      border-radius: 0;
+      background: transparent;
+    }
+    .camera-meta-stack {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr);
+      gap: 8px;
+    }
+    .camera-meta-stack .badge {
+      width: 100%;
+      justify-content: space-between;
+      border-radius: 8px;
+      min-height: 32px;
+    }
 
     .live-toolbar { margin-bottom: 14px; }
     .live-grid { display: grid; gap: 14px; }
@@ -888,6 +923,7 @@
         <label class="check-row"><input id="camSaveImages" type="checkbox">Save event images locally</label>
         <label class="check-row"><input id="camUploadImages" type="checkbox">Upload event images</label>
         <label class="check-row"><input id="camRecordVideo" type="checkbox">Record/upload video</label>
+        <label class="check-row"><input id="camSaveVideos" type="checkbox">Save record videos locally</label>
         <div class="field"><label for="camRecordSeconds">Record seconds</label><input id="camRecordSeconds" type="number" min="1"></div>
         <div class="field"><label for="camRecordCooldown">Record cooldown seconds</label><input id="camRecordCooldown" type="number" min="1"></div>
       </div>
@@ -1375,6 +1411,11 @@
       }
       grid.innerHTML = state.cameras.map((camera, index) => `
         <article class="camera-card">
+          <div class="camera-thumb camera-open" data-index="${index}" role="button" tabindex="0">
+            ${camera.rtsp_url || camera.go2rtc_src
+              ? `<img src="${esc(cameraSnapshotUrl(index))}" loading="lazy" alt="${esc(cameraName(camera, index))} snapshot" onerror="this.replaceWith(Object.assign(document.createElement('div'), {className: 'empty', textContent: 'Snapshot unavailable'}))">`
+              : '<div class="empty">No snapshot source</div>'}
+          </div>
           <div class="camera-title camera-open" data-index="${index}" role="button" tabindex="0">
             <div>
               <h3>${esc(cameraName(camera, index))}</h3>
@@ -1382,7 +1423,7 @@
             </div>
             <span class="badge ${camera.enabled ? "good" : "bad"}">${camera.enabled ? "Enabled" : "Disabled"}</span>
           </div>
-          <div class="grid cols-2">
+          <div class="camera-meta-stack">
             <span class="badge">Prompt: ${esc(promptTitle(camera.prompt_id))}</span>
             <span class="badge ${camera.teldrive_record_enabled ? "info" : ""}">Record: ${camera.teldrive_record_enabled ? "On" : "Off"}</span>
           </div>
@@ -1484,7 +1525,7 @@
       state.editingCamera = index;
       const camera = index >= 0 ? state.cameras[index] : {
         enabled: true, name: "", rtsp_url: "", go2rtc_src: "", live_url: "", prompt_id: "",
-        local_save_images: true, teldrive_upload_images: true, teldrive_record_enabled: false,
+        local_save_images: true, local_save_videos: true, teldrive_upload_images: true, teldrive_record_enabled: false,
         record_seconds: 10, record_cooldown: 300
       };
       setText("cameraDialogTitle", index >= 0 ? "Edit camera" : "Add camera");
@@ -1495,6 +1536,7 @@
       $("camLive").value = camera.live_url || "";
       $("camPrompt").value = camera.prompt_id || "";
       $("camSaveImages").checked = camera.local_save_images !== false;
+      $("camSaveVideos").checked = camera.local_save_videos !== false;
       $("camUploadImages").checked = camera.teldrive_upload_images !== false;
       $("camRecordVideo").checked = camera.teldrive_record_enabled === true;
       $("camRecordSeconds").value = camera.record_seconds || 10;
@@ -1629,6 +1671,7 @@
         live_url: $("camLive").value.trim(),
         prompt_id: $("camPrompt").value,
         local_save_images: $("camSaveImages").checked,
+        local_save_videos: $("camSaveVideos").checked,
         teldrive_upload_images: $("camUploadImages").checked,
         teldrive_record_enabled: $("camRecordVideo").checked,
         record_seconds: Math.max(1, Number($("camRecordSeconds").value || 10)),
