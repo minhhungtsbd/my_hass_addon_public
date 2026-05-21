@@ -1,239 +1,304 @@
 # Fall Detection Web
 
-Web UI giám sát té ngã chạy trên VPS/server:
+Fall Detection Web is a standalone camera monitoring web application for fall detection, incident verification, alerting, and event review.
+
+The project is no longer positioned as a Home Assistant add-on. It is a self-hosted web app that can run on a VPS, local server, mini PC, or dedicated monitoring machine.
 
 ```text
-Camera (RTSP)
-  → YOLO local detect person (ultralytics, trong Python app)
-  → AI vision verify (cloud API)
-  → Telegram alert nếu EMERGENCY
+Camera / RTSP / go2rtc
+  -> local person detection
+  -> AI vision verification
+  -> incident timeline
+  -> Telegram alert
+  -> recordings and evidence review
 ```
 
-## Tính Năng
+## Product Direction
 
-- **YOLO local detection only** — dùng `ultralytics` + `opencv-python` để detect `person` từ RTSP stream. Khi phát hiện, gọi AI cloud để xác minh té ngã. Không còn detection mode khác.
-- **AI Verify** — gửi ảnh lên OpenAI-compatible vision API, parse response `SAFE / EMERGENCY`.
-- **Telegram Alert** — gửi ảnh kèm caption khi AI kết luận EMERGENCY, có cooldown để tránh spam.
-- **Multi-camera** — cấu hình nhiều camera, bật/tắt từng camera qua UI.
-- **Đăng nhập bảo mật** — HTTP-only JWT cookie, mật khẩu hash bằng bcrypt.
-- **SQLite storage** — events và settings đều lưu trong `data/fall_detection.db`.
-- **Live view** — xem stream qua go2rtc iframe (MSE/WebRTC) hoặc Python MJPEG proxy.
-- **Auto-migrate** — tự import `events.jsonl` và `config.json` cũ vào DB khi khởi động lần đầu.
+The application should feel like a professional security operations dashboard, not a minimal add-on panel.
 
-## Cấu Trúc Mã Nguồn
+Design goals:
+
+- Clear camera status and incident priority at first glance.
+- Fast access to live view, recent events, recordings, and test tools.
+- Polished dark-mode interface suitable for 24/7 monitoring screens.
+- Responsive layout for desktop, tablet, and mobile control.
+- Professional UX for operators: fewer scattered controls, clearer actions, better feedback states.
+- Independent deployment, configuration, and user session management.
+
+The UI can evolve beyond the old lightweight add-on constraints when needed. Keep the product reliable, but prioritize a complete web-app experience.
+
+## Core Features
+
+- **Professional dashboard**: monitor state, camera health, system stats, recent incidents, and AI result summary.
+- **Multi-camera management**: add, edit, enable, disable, test, and assign prompts per camera.
+- **Live monitoring**: view cameras through go2rtc, custom live URLs, or fallback MJPEG proxy.
+- **AI vision verification**: send snapshots to OpenAI-compatible vision APIs and classify results such as `SAFE` or `EMERGENCY`.
+- **Telegram alerts**: send incident photos and captions when AI verification confirms an emergency.
+- **Event history**: searchable incident log with thumbnails, timestamps, AI output, and camera metadata.
+- **Recordings**: review uploaded clips by camera and date range.
+- **Prompt management**: maintain reusable AI prompts for different camera contexts.
+- **Settings UI**: configure AI provider, model, confidence, cooldowns, Telegram, go2rtc, Teldrive, and credentials.
+- **Secure login**: HTTP-only JWT session cookie and bcrypt password hashing.
+- **SQLite storage**: local database for settings, events, and users.
+
+## UX/UI Requirements
+
+The frontend should be treated as a real web product.
+
+### Visual Style
+
+- Dark operational dashboard theme.
+- Dense but readable information layout.
+- Strong status colors for running, stopped, warning, and emergency states.
+- Consistent card, table, modal, toast, and tab styling.
+- No emoji icons in UI controls; use SVG or a consistent icon set.
+- Clear hover, active, disabled, loading, empty, and error states.
+
+### Main Screens
+
+| Screen | Purpose |
+|---|---|
+| Dashboard | System overview, quick actions, recent events, camera summary |
+| Cameras | Camera CRUD, test snapshot, test AI, upload/record options |
+| Prompts | Prompt templates for AI verification |
+| Live | Multi-camera monitoring grid |
+| Settings | AI, Telegram, go2rtc, Teldrive, detection, and account settings |
+| Events | Incident history with thumbnails and filters |
+| Recordings | Video evidence review |
+| Tools | Manual AI test, Telegram test, image upload test |
+
+### Interaction Standards
+
+- Important actions must provide immediate feedback with toast or inline status.
+- Destructive actions must require confirmation.
+- Long AI or network operations must show a pending state.
+- Tables must remain usable on small screens.
+- Modals must be keyboard accessible.
+- Focus states must be visible.
+- Mobile layout must avoid horizontal page scroll except inside tables where needed.
+
+## Tech Stack
+
+Current backend and server-rendered frontend:
+
+- Python
+- FastAPI
+- Jinja2 templates
+- SQLite
+- requests
+- OpenCV / YOLO detection pipeline
+- Telegram Bot API
+- Teldrive API integration
+- go2rtc integration for live view and snapshots
+
+The app can later move to a richer frontend if needed, but the backend should remain simple to deploy and operate.
+
+## Source Structure
 
 ```text
 fall_detection_web/
-├── app.py           # FastAPI routes, lifespan startup/shutdown
-├── auth.py          # bcrypt password + JWT HTTP-only cookie session
-├── config.py        # Đọc/ghi config từ SQLite, override bằng .env
-├── db.py            # SQLite layer: events, users, settings
-├── monitor.py       # YOLO monitor loop + RTSP capture threads
-├── ai.py            # AI verify (vision API) + Telegram sender
+├── app.py             # FastAPI routes and application lifecycle
+├── auth.py            # Login, JWT cookie session, password hashing
+├── config.py          # Settings loading, defaults, env override
+├── db.py              # SQLite storage layer
+├── monitor.py         # Camera monitoring and detection workflow
+├── ai.py              # AI vision verification and Telegram sender
+├── teldrive.py        # Teldrive upload and file helpers
 ├── requirements.txt
 ├── .env.example
-└── templates/
-    ├── index.html   # Toàn bộ frontend (Jinja2)
-    └── login.html   # Trang đăng nhập
+├── templates/
+│   ├── index.html     # Main web UI
+│   └── login.html     # Login UI
+└── data/              # Local runtime data, ignored by git
 ```
 
-## Cài Đặt
+## Installation
 
 ```bash
 git clone <repo>
 cd fall_detection_web
 python3 -m venv venv
-source venv/bin/activate          # Windows: venv\Scripts\activate
+source venv/bin/activate
 pip install -r requirements.txt
 uvicorn app:app --host 0.0.0.0 --port 8090
 ```
 
-Mở trình duyệt: `http://<server-ip>:8090`
+Windows PowerShell:
 
-Đăng nhập mặc định: **admin / admin** (đổi ngay sau lần đầu).
-
-## Cấu Hình
-
-Cấu hình được lưu trong **SQLite** (`data/fall_detection.db`, bảng `settings`). Thay đổi qua tab **Settings** trong UI, nhấn **Save Settings** là lưu ngay — không cần restart.
-
-`.env` (tùy chọn) dùng để **override** các giá trị trong DB, phù hợp cho container hoặc secrets không muốn lưu trong DB:
-
-```dotenv
-AI_API_KEY=sk-xxxxx
-TELEGRAM_BOT_TOKEN=123456789:AABBCCxx
-TELEGRAM_CHAT_ID=-100123456789
-RTSP_URL=rtsp://10.10.0.2:8554/bep_sub
+```powershell
+python -m venv venv
+.\venv\Scripts\Activate.ps1
+pip install -r requirements.txt
+uvicorn app:app --host 0.0.0.0 --port 8090
 ```
 
-Sao chép từ template:
+Open:
+
+```text
+http://<server-ip>:8090
+```
+
+Default login:
+
+```text
+admin / admin
+```
+
+Change the default account after the first login.
+
+## Configuration
+
+Runtime settings are stored in SQLite at:
+
+```text
+data/fall_detection.db
+```
+
+Most settings can be changed from the **Settings** screen. Environment variables can override database settings for deployment secrets and container environments.
+
+Create a local `.env` file from the template:
 
 ```bash
 cp .env.example .env
 ```
 
-### Các biến `.env` được hỗ trợ
+Common variables:
 
-| Biến env | Config key | Mô tả |
-|---|---|---|
-| `RTSP_URL` | `rtsp_url` | RTSP stream fallback |
-| `GO2RTC_URL` | `go2rtc_url` | Base URL go2rtc |
-| `TELEGRAM_BOT_TOKEN` | `telegram_bot_token` | Bot token |
-| `TELEGRAM_CHAT_ID` | `telegram_chat_id` | Chat ID nhận alert |
-| `AI_BASE_URL` | `ai_base_url` | OpenAI-compatible endpoint |
-| `AI_API_KEY` | `ai_api_key` | API key |
-| `VISION_MODEL` | `vision_model` | Model vision |
-| `YOLO_MODEL` | `yolo_model` | File model YOLO |
-| `YOLO_IMGSZ` | `yolo_imgsz` | Kích thước ảnh inference |
-| `CONFIDENCE` | `confidence` | Ngưỡng detect person |
-| `VERIFY_INTERVAL` | `verify_interval` | Giây tối thiểu giữa 2 lần gọi AI |
-| `ALERT_COOLDOWN` | `alert_cooldown` | Giây tối thiểu giữa 2 cảnh báo Telegram |
-| `FRAME_SKIP` | `frame_skip` | Bỏ N-1 frame để giảm CPU |
-| `LOOP_SLEEP` | `loop_sleep` | Thời gian nghỉ mỗi vòng lặp (giây) |
-| `TELDRIVE_ENABLED` | `teldrive_enabled` | Bật upload ảnh/video event lên Teldrive |
-| `TELDRIVE_BASE_URL` | `teldrive_base_url` | URL Teldrive, ví dụ `https://teldrive.minhhungtsbd.me` |
-| `TELDRIVE_TOKEN` | `teldrive_token` | Bearer token Teldrive |
-| `TELDRIVE_ROOT_PATH` | `teldrive_root_path` | Thư mục gốc trên Teldrive |
-| `TELDRIVE_CHANNEL_ID` | `teldrive_channel_id` | Channel ID Teldrive tùy chọn |
-| `TELDRIVE_RECORD_SECONDS` | `teldrive_record_seconds` | Fallback legacy cho camera chưa có Record Seconds riêng |
-| `TELDRIVE_RECORD_COOLDOWN` | `teldrive_record_cooldown` | Fallback legacy cho camera chưa có Record Cooldown riêng |
-
-> **Priority:** `.env` / os.environ > SQLite settings > default values
-
-## Database
-
-Tất cả dữ liệu lưu trong `data/fall_detection.db`:
-
-| Bảng | Mô tả |
+| Variable | Purpose |
 |---|---|
-| `settings` | Config key-value (thay thế config.json) |
-| `events` | Log sự kiện (detect, verify, alert, error…) |
-| `users` | Tài khoản đăng nhập (username + bcrypt hash) |
+| `AI_BASE_URL` | OpenAI-compatible API endpoint |
+| `AI_API_KEY` | Vision API key |
+| `VISION_MODEL` | Vision model name |
+| `TELEGRAM_BOT_TOKEN` | Telegram bot token |
+| `TELEGRAM_CHAT_ID` | Telegram chat ID |
+| `GO2RTC_URL` | go2rtc base URL |
+| `RTSP_URL` | Fallback RTSP URL |
+| `YOLO_MODEL` | YOLO model file |
+| `CONFIDENCE` | Person detection confidence threshold |
+| `VERIFY_INTERVAL` | Minimum seconds between AI verification calls |
+| `ALERT_COOLDOWN` | Minimum seconds between Telegram alerts |
+| `TELDRIVE_ENABLED` | Enable Teldrive upload |
+| `TELDRIVE_BASE_URL` | Teldrive server URL |
+| `TELDRIVE_TOKEN` | Teldrive bearer token |
+| `TELDRIVE_ROOT_PATH` | Root folder for uploaded evidence |
 
-Ảnh snapshot của events lưu tại `data/event_images/` và tự xóa sau **24 giờ**.
-Events tự prune khi vượt **5000 records** (xóa batch cũ nhất).
+Priority:
 
-### Auto-migration
-
-Khi khởi động lần đầu, nếu tồn tại file cũ:
-
-- `data/config.json` → import vào bảng `settings` → rename thành `config.json.migrated`
-- `data/events.jsonl` → import vào bảng `events` → rename thành `events.jsonl.migrated`
-
-## UI
-
-| Tab | Chức năng |
-|---|---|
-| **Dashboard** | Start/Stop monitor, tổng quan trạng thái, 5 events gần nhất |
-| **Cameras** | Thêm/sửa/xóa camera, test snapshot, test AI từng camera, bật/tắt upload ảnh/video theo camera |
-| **Live** | Xem stream live đa camera, chọn 1/2/3 cột; double-click camera ở 2/3 cột để chuyển camera đó sang full width |
-| **Settings** | Cấu hình YOLO, AI API, Telegram, cooldown, RTSP… |
-| **Events** | Bảng log events với thumbnail ảnh lazy-load; ưu tiên ảnh từ Teldrive nếu đã upload |
-| **Recordings** | Xem lại clip đã upload theo camera và khung thời gian |
-| **Tools** | Test AI với snapshot, upload ảnh test, test Telegram |
-
-URL hash: `#dashboard`, `#cameras`, `#live`, `#settings`, `#events`, `#recordings`, `#tools`
-
-## API Endpoints
-
-Tất cả endpoint `/api/*` yêu cầu đăng nhập (JWT cookie). Trả `401` nếu chưa xác thực.
-
-```http
-GET  /                           # UI chính (redirect /login nếu chưa đăng nhập)
-GET  /login                      # Trang đăng nhập
-POST /auth/login                 # Form login
-POST /auth/logout                # Logout
-
-GET  /api/config                 # Đọc config hiện tại
-POST /api/config                 # Lưu config (JSON body)
-POST /api/teldrive/check         # Kiểm tra Teldrive access_token còn hợp lệ
-GET  /api/status                 # Trạng thái monitor + event count
-POST /api/start                  # Khởi động YOLO monitor
-POST /api/stop                   # Dừng monitor
-
-GET  /api/events                 # Lấy danh sách events
-DELETE /api/events               # Xóa toàn bộ events
-GET  /api/recordings             # Lấy clip Teldrive đã upload, lọc camera/date_from/date_to
-
-GET  /api/camera/snapshot?index= # Chụp ảnh camera
-GET  /api/camera/video?index=    # MJPEG stream camera
-
-POST /api/test-ai                # Test AI với snapshot mới nhất
-POST /api/test-ai-camera?index=  # Test AI với snapshot camera cụ thể
-POST /api/test-telegram          # Test gửi Telegram
-POST /api/test-ai-upload         # Test AI với ảnh upload (max 10MB)
-
-GET  /api/event-image/{filename} # Ảnh event (yêu cầu đăng nhập)
-GET  /api/teldrive/file/{id}/{name} # Proxy file Teldrive qua phiên đăng nhập Fall Detection
+```text
+environment variables -> SQLite settings -> application defaults
 ```
 
-## Nhiều Camera
+## Camera Workflow
 
-Camera được cấu hình trong tab **Cameras**. Mỗi camera gồm:
+Each camera can define:
 
-| Field | Mô tả |
+| Field | Description |
 |---|---|
-| Enabled | Bật/tắt camera |
-| Name | Tên hiển thị |
-| RTSP URL | URL RTSP để YOLO capture frame |
-| go2rtc src | Tên stream trong go2rtc (cho snapshot JPEG và live view) |
-| Live URL | (Tùy chọn) URL stream trực tiếp thay vì tự build từ go2rtc_src |
-| Save event images locally | Lưu ảnh event vào `data/event_images/` cho camera này |
-| Upload event images | Upload ảnh event của camera này lên Teldrive |
-| Record/upload video | Ghi và upload clip ngắn khi camera này phát hiện `person` |
-| Record Seconds | Số giây ghi clip riêng cho camera này |
-| Record Cooldown | Cooldown giữa 2 lần ghi clip riêng cho camera này |
+| Enabled | Include camera in monitoring |
+| Name | Display name |
+| RTSP URL | Source used by the local detection pipeline |
+| go2rtc src | go2rtc stream name for snapshot/live/record helpers |
+| Live URL | Optional direct live embed URL |
+| Prompt | AI prompt assigned to this camera |
+| Save event images locally | Store evidence images in `data/event_images/` |
+| Upload event images | Upload evidence images to Teldrive |
+| Record/upload video | Capture and upload short event clips |
+| Record Seconds | Clip duration |
+| Record Cooldown | Cooldown between camera recordings |
 
-Thứ tự ưu tiên lấy **snapshot thủ công / test AI**:
+Snapshot preference:
 
 1. go2rtc JPEG API: `{go2rtc_url}/api/frame.jpeg?src={go2rtc_src}`
-2. Fallback RTSP OpenCV
+2. RTSP/OpenCV fallback
 
-Monitor chạy nền vẫn dùng RTSP frame để YOLO local detect `person`. go2rtc chỉ dùng cho snapshot thủ công/test và live view khi có cấu hình.
-Nếu chưa có camera `enabled` với `rtsp_url`, monitor sẽ không auto-start và API start sẽ trả lỗi rõ ràng thay vì làm crash thread nền.
+Live view preference:
 
-## Teldrive Upload
+1. `live_url`
+2. `{go2rtc_url}/stream.html?src={go2rtc_src}&mode=mse`
+3. `/api/camera/video?index=N`
 
-Trong tab **Settings**, bật Teldrive và cấu hình base URL/token/root path chung. Tùy chọn upload ảnh event và ghi/upload video nằm trong từng camera để có thể bật riêng theo nhu cầu.
+## AI Verification
 
-`TELDRIVE_TOKEN` là giá trị cookie `access_token` của phiên đăng nhập Teldrive. Browser không cho trang Fall Detection đọc cookie của domain Teldrive, nên không thể tự động lấy token chỉ bằng một nút bấm nếu hai app chạy khác origin. Hãy copy `access_token` từ DevTools/Cookie Editor rồi dùng nút **Check Teldrive Token** trong Settings để kiểm tra token còn live hay đã hết hạn.
+The application uses OpenAI-compatible vision APIs. Compatible providers can include OpenAI, OpenRouter, 9Router, Gemini OpenAI-compatible gateways, or other services that accept compatible request formats.
 
-Luồng upload:
+Expected AI output should be easy to parse, preferably with clear labels such as:
 
-1. Tạo thư mục bằng `POST /api/files/mkdir`
-2. Upload file part bằng `POST /api/uploads/{upload_id}`
-3. Đọc lại part bằng `GET /api/uploads/{upload_id}`
-4. Tạo file metadata bằng `POST /api/files`, trong đó `path` là thư mục cha và `name` là tên file
+```text
+SAFE
+EMERGENCY
+```
 
-Mặc định app dùng `https://teldrive.minhhungtsbd.me` và lưu theo cấu trúc:
+The image input is sent as a base64 data URL.
+
+## Telegram Alerts
+
+Telegram alerts use the Telegram Bot API.
+
+Preferred method:
+
+```text
+sendPhoto
+```
+
+Alerts should include:
+
+- Camera name
+- AI decision
+- Timestamp
+- Snapshot image
+- Short explanation when available
+
+Cooldown settings prevent repeated alerts for the same ongoing situation.
+
+## Teldrive Evidence Storage
+
+Teldrive can store event images and video clips for later review.
+
+Default folder pattern:
 
 ```text
 /Fall Detection/{camera}/images/
 /Fall Detection/{camera}/videos/
 ```
 
-Sau khi upload thành công, app lưu lại `file id`, `name` và `path` của Teldrive vào event. Cột ảnh trong tab **Events** sẽ dùng proxy Teldrive nếu có metadata upload, nếu chưa có thì fallback về ảnh local trong `data/event_images/`. Tab **Recordings** dùng metadata video đã lưu để xem lại/lọc theo camera và thời gian.
+The **Events** screen uses Teldrive metadata when available and falls back to local images when needed. The **Recordings** screen uses saved video metadata for filtering and playback.
 
-Ảnh event local được cache bằng `ETag`/`Last-Modified` trong 24 giờ và thumbnail trong tab **Events** chỉ tải khi tab đang mở và ảnh gần vùng nhìn thấy.
-Proxy Teldrive thử stream file public trước, sau đó mới fallback Bearer token; nếu Teldrive trả `401/403`, app chuyển hướng về URL Teldrive gốc để trình duyệt dùng session Teldrive hiện có.
+## API Overview
 
-Clip ghi hình ưu tiên lấy trực tiếp từ go2rtc bằng `{go2rtc_url}/api/stream.mp4?src={go2rtc_src}&duration=N&filename=...`. Đây là đường nhẹ CPU nhất vì go2rtc đóng gói stream camera thành MP4; nếu source go2rtc là H.264 thì clip sẽ phù hợp Chrome/HTML5 video/Teldrive preview mà không cần transcode. Nếu camera không có `go2rtc_src` hoặc go2rtc record lỗi, app fallback sang ghi tạm bằng OpenCV rồi transcode bằng `ffmpeg` sang MP4 H.264 (`libx264`, baseline, `yuv420p`, `+faststart`) nếu máy có `ffmpeg` trong `PATH`.
+All `/api/*` endpoints require an authenticated session.
 
-Nếu cần fallback OpenCV/ffmpeg trên Ubuntu/Debian VPS, cài:
+```http
+GET  /                              # Main web UI
+GET  /login                         # Login page
+POST /auth/login                    # Login form
+POST /auth/logout                   # Logout
 
-```bash
-sudo apt update
-sudo apt install -y ffmpeg
+GET  /api/config                    # Read current config
+POST /api/config                    # Save config
+GET  /api/status                    # Monitor and system status
+POST /api/start                     # Start monitoring
+POST /api/stop                      # Stop monitoring
+
+GET  /api/events                    # List events
+DELETE /api/events                  # Clear events
+GET  /api/recordings                # List recordings
+
+GET  /api/camera/snapshot?index=N   # Capture camera snapshot
+GET  /api/camera/video?index=N      # Camera video proxy
+
+POST /api/test-ai                   # Test AI with latest snapshot
+POST /api/test-ai-camera?index=N    # Test AI with selected camera
+POST /api/test-telegram             # Test Telegram alert
+POST /api/test-ai-upload            # Test AI with uploaded image
+
+GET  /api/event-image/{filename}    # Local event image
+GET  /api/teldrive/file/{id}/{name} # Teldrive file proxy
 ```
 
-Teldrive upload qua API có thể vẫn hiển thị như file/document trong Telegram storage channel; muốn Telegram preview chắc chắn theo kiểu video thì cần gửi thêm một bản qua Telegram Bot API `sendVideo`.
+## Run as a Service
 
-Thứ tự ưu tiên **live view**:
-
-1. `live_url` nếu có (embed iframe)
-2. `{go2rtc_url}/stream.html?src={go2rtc_src}&mode=mse` (go2rtc MSE)
-3. `/api/camera/video?index=N` (Python MJPEG proxy — tốn CPU hơn)
-
-## Chạy Nền Bằng systemd
+Example systemd service:
 
 ```ini
 [Unit]
@@ -252,28 +317,36 @@ EnvironmentFile=/opt/fall-detection/.env
 WantedBy=multi-user.target
 ```
 
+Enable:
+
 ```bash
 systemctl enable --now fall-detection
 journalctl -u fall-detection -f
 ```
 
-## Dependencies
+## UI Roadmap
 
-```
-fastapi          # Web framework
-uvicorn          # ASGI server
-opencv-python    # RTSP capture + MJPEG proxy
-ultralytics      # YOLO person detection
-requests         # AI API + Telegram (shared Session)
-bcrypt           # Password hashing
-python-jose      # JWT session token
-jinja2           # HTML templates
-python-multipart # Form + file upload parsing
-```
+Near-term professional UI improvements:
 
-## Lưu Ý
+- Replace emoji and text-only controls with consistent SVG icons.
+- Redesign dashboard with status-first layout and incident severity hierarchy.
+- Improve camera table into an operator-friendly management view.
+- Add better empty states for no cameras, no events, and no recordings.
+- Add loading states for AI tests, Telegram tests, snapshot capture, and recordings.
+- Improve mobile navigation and table handling.
+- Standardize form groups, destructive actions, modals, and toast messages.
+- Add clearer visual treatment for emergency events.
 
-- `data/` đã được gitignore — DB, ảnh, `.env` không bao giờ bị commit.
-- Khi save Settings từ UI, giá trị trong DB được cập nhật ngay; monitor tự restart với config mới.
-- AI API chấp nhận response dạng JSON, SSE (`data: ...`) và multiple JSON objects (tương thích nhiều gateway).
-- bcrypt truncate password ở 72 bytes (giới hạn của thuật toán bcrypt).
+Possible future frontend upgrade:
+
+- Keep the FastAPI API as backend.
+- Add a modern frontend only if the UX demands it.
+- Preserve simple deployment with a single server process or a clearly documented build step.
+
+## Notes
+
+- `data/`, `.env`, snapshots, recordings, and local database files must not be committed.
+- Change the default admin password before exposing the app.
+- Put the app behind HTTPS when used outside a private LAN.
+- AI provider latency and cost depend on the selected vision model.
+- Camera stream stability depends on RTSP source, network quality, and go2rtc configuration.

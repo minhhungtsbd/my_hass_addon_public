@@ -79,8 +79,9 @@ db.EVENT_IMAGES_DIR.mkdir(parents=True, exist_ok=True)
 @app.get("/favicon.ico")
 async def favicon():
     svg = '''<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">
-        <rect width="100" height="100" rx="20" fill="#12a9f5"/>
-        <text x="50" y="70" font-size="65" font-family="Arial" fill="#fff" text-anchor="middle">🛡️</text>
+        <rect width="100" height="100" rx="20" fill="#020617"/>
+        <path d="M50 16l28 12v21c0 19-11.2 33.6-28 40-16.8-6.4-28-21-28-40V28l28-12z" fill="#0f172a" stroke="#22c55e" stroke-width="5"/>
+        <path d="M30 52h10l5-14 9 28 5-14h11" fill="none" stroke="#22c55e" stroke-width="6" stroke-linecap="round" stroke-linejoin="round"/>
     </svg>'''
     return Response(content=svg, media_type="image/svg+xml")
 
@@ -104,7 +105,7 @@ async def login(
     if not user or not auth.verify_password(password, str(user["password_hash"])):
         return templates.TemplateResponse(
             "login.html",
-            {"request": request, "error": "Sai tài khoản hoặc mật khẩu.", "username": username},
+            {"request": request, "error": "Invalid username or password.", "username": username},
             status_code=status.HTTP_401_UNAUTHORIZED,
         )
     
