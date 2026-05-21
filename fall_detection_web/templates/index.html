@@ -931,12 +931,22 @@
         <div class="field full"><label for="camRtsp">RTSP URL</label><input id="camRtsp" autocomplete="off"></div>
         <div class="field"><label for="camGo2rtc">go2rtc src</label><input id="camGo2rtc" autocomplete="off"></div>
         <div class="field"><label for="camLive">Live URL</label><input id="camLive" autocomplete="off"></div>
-        <label class="check-row"><input id="camSaveImages" type="checkbox">Save event images locally</label>
-        <label class="check-row"><input id="camUploadImages" type="checkbox">Upload event images</label>
-        <label class="check-row"><input id="camRecordVideo" type="checkbox">Record/upload video</label>
-        <label class="check-row"><input id="camSaveVideos" type="checkbox">Save record videos locally</label>
-        <div class="field"><label for="camRecordSeconds">Record seconds</label><input id="camRecordSeconds" type="number" min="1"></div>
-        <div class="field"><label for="camRecordCooldown">Record cooldown seconds</label><input id="camRecordCooldown" type="number" min="1"></div>
+        <div class="field">
+          <label>Lưu trữ local</label>
+          <div class="stack">
+            <label class="check-row"><input id="camSaveImages" type="checkbox">Lưu ảnh sự kiện trên VPS</label>
+            <label class="check-row"><input id="camSaveVideos" type="checkbox">Lưu video ghi hình trên VPS</label>
+          </div>
+        </div>
+        <div class="field">
+          <label>Upload / ghi hình</label>
+          <div class="stack">
+            <label class="check-row"><input id="camUploadImages" type="checkbox">Upload ảnh sự kiện</label>
+            <label class="check-row"><input id="camRecordVideo" type="checkbox">Ghi và upload video</label>
+          </div>
+        </div>
+        <div class="field"><label for="camRecordSeconds">Thời lượng quay video (giây)</label><input id="camRecordSeconds" type="number" min="1"></div>
+        <div class="field"><label for="camRecordCooldown">Thời gian chờ trước lần quay tiếp theo (giây)</label><input id="camRecordCooldown" type="number" min="1"></div>
       </div>
     </div>
     <div class="dialog-foot">
