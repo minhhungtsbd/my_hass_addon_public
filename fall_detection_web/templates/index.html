@@ -371,6 +371,8 @@
       gap: 12px;
     }
     .camera-title { display: flex; justify-content: space-between; gap: 10px; align-items: flex-start; }
+    .camera-open { cursor: pointer; border-radius: var(--radius); }
+    .camera-open:focus-visible { outline: 3px solid rgba(34, 197, 94, .22); outline-offset: 4px; }
     .camera-title h3 { font-size: 14px; }
     .camera-title p { color: var(--muted); margin-top: 4px; word-break: break-all; }
 
@@ -512,8 +514,6 @@
         <button class="nav-btn" data-view="cameras" type="button"><span data-icon="camera"></span>Cameras</button>
         <button class="nav-btn" data-view="prompts" type="button"><span data-icon="file-text"></span>Prompts</button>
         <button class="nav-btn" data-view="live" type="button"><span data-icon="monitor"></span>Live View</button>
-        <button class="nav-btn" data-view="events" type="button"><span data-icon="list"></span>Events</button>
-        <button class="nav-btn" data-view="recordings" type="button"><span data-icon="video"></span>Recordings</button>
         <button class="nav-btn" data-view="settings" type="button"><span data-icon="settings"></span>Settings</button>
         <button class="nav-btn" data-view="tools" type="button"><span data-icon="wrench"></span>Tools</button>
       </nav>
@@ -615,12 +615,11 @@
           <section class="panel">
             <div class="panel-head">
               <div>
-                <h3>Recent Events</h3>
-                <p>Latest verification, alert, and error records.</p>
+                <h3>Camera Detail</h3>
+                <p>Open a camera to review its events, recordings, and live source.</p>
               </div>
-              <button class="btn small" data-open-view="events" type="button">Open</button>
             </div>
-            <div id="dashboardEvents" class="stack"></div>
+            <div id="dashboardEvents" class="empty">Select a camera from the Cameras screen to view its detail timeline.</div>
           </section>
         </div>
       </section>
@@ -671,15 +670,30 @@
         <div id="liveGrid" class="live-grid cols-2"></div>
       </section>
 
-      <section id="view-events" class="view">
+      <section id="view-camera-detail" class="view">
+        <div class="panel" style="margin-bottom:14px;">
+          <div class="split">
+            <div>
+              <h3 id="cameraDetailName">Camera detail</h3>
+              <p id="cameraDetailMeta" class="muted">Select a camera to view its timeline.</p>
+            </div>
+            <div class="actions">
+              <button class="btn" data-open-view="cameras" type="button">Back to cameras</button>
+              <button id="detailSnapshotBtn" class="btn" type="button"><span data-icon="camera"></span>Snapshot</button>
+              <button id="detailTestAiBtn" class="btn primary" type="button"><span data-icon="spark"></span>Test AI</button>
+            </div>
+          </div>
+          <div id="cameraDetailLive" style="margin-top:14px;"></div>
+        </div>
+
         <div class="table-panel">
           <div class="panel-head" style="padding:16px; margin:0;">
             <div>
-              <h3>Events</h3>
-              <p>Incident timeline with AI decision and evidence thumbnails.</p>
+              <h3>Camera Events</h3>
+              <p>Timeline filtered to the selected camera.</p>
             </div>
             <div class="actions">
-              <select id="eventFilterCamera" aria-label="Filter camera" style="width:170px;"><option value="">All cameras</option></select>
+              <select id="eventFilterCamera" aria-label="Filter camera" style="width:170px;"><option value="">Select camera</option></select>
               <select id="eventFilterAI" aria-label="Filter AI result" style="width:150px;">
                 <option value="">All AI results</option>
                 <option value="SAFE">SAFE</option>
@@ -709,17 +723,15 @@
             </div>
           </div>
         </div>
-      </section>
 
-      <section id="view-recordings" class="view">
-        <div class="panel">
+        <div class="panel" style="margin-top:14px;">
           <div class="panel-head">
             <div>
-              <h3>Recordings</h3>
-              <p>Video evidence uploaded to Teldrive.</p>
+              <h3>Camera Recordings</h3>
+              <p>Video evidence filtered to the selected camera.</p>
             </div>
             <div class="actions">
-              <select id="recordingFilterCamera" style="width:170px;"><option value="">All cameras</option></select>
+              <select id="recordingFilterCamera" style="width:170px;"><option value="">Select camera</option></select>
               <input id="recordingDateFrom" type="date" style="width:150px;" aria-label="Date from">
               <input id="recordingDateTo" type="date" style="width:150px;" aria-label="Date to">
               <select id="recordingPageSize" style="width:110px;" aria-label="Recordings per page">
@@ -923,6 +935,7 @@
       config: {},
       cameras: [],
       prompts: [],
+      selectedCameraIndex: -1,
       eventsPage: 1,
       eventsTotal: 0,
       recordingsPage: 1,
@@ -939,8 +952,7 @@
       cameras: ["Cameras", "Manage sources, prompts, and evidence policy."],
       prompts: ["Prompts", "Reusable AI instructions for verification."],
       live: ["Live View", "Watch configured camera streams."],
-      events: ["Events", "Review incident history and evidence."],
-      recordings: ["Recordings", "Playback uploaded video evidence."],
+      "camera-detail": ["Camera Detail", "Review one camera timeline and recordings."],
       settings: ["Settings", "Configure AI, detection, alerts, and storage."],
       tools: ["Tools", "Run diagnostics and account updates."]
     };
@@ -1015,8 +1027,11 @@
       setText("pageSubtitle", pages[name][1]);
       history.replaceState(null, "", `#${name}`);
       if (name === "live") renderLive();
-      if (name === "events") loadEvents();
-      if (name === "recordings") loadRecordings();
+      if (name === "camera-detail") {
+        renderCameraDetail();
+        loadEvents();
+        loadRecordings();
+      }
     }
 
     function collectConfig() {
@@ -1120,11 +1135,14 @@
 
     async function loadEvents() {
       const limit = Number($("eventPageSize").value || 10);
+      const camera = state.selectedCameraIndex >= 0
+        ? cameraName(state.cameras[state.selectedCameraIndex], state.selectedCameraIndex)
+        : $("eventFilterCamera").value;
       const params = new URLSearchParams({
         page: String(state.eventsPage),
         limit: String(limit),
         ai_result: $("eventFilterAI").value,
-        camera: $("eventFilterCamera").value
+        camera
       });
       const data = await api(`/api/events?${params}`);
       state.eventsTotal = data.total || 0;
@@ -1133,7 +1151,6 @@
 
     function renderEvents(events, total, limit) {
       const body = $("eventsBody");
-      const recent = $("dashboardEvents");
       if (!events.length) {
         body.innerHTML = '<tr><td colspan="6"><div class="empty">No events found.</div></td></tr>';
       } else {
@@ -1152,27 +1169,17 @@
       setText("eventsPageInfo", `Page ${state.eventsPage} of ${totalPages} · ${total} events`);
       $("prevPageBtn").disabled = state.eventsPage <= 1;
       $("nextPageBtn").disabled = state.eventsPage >= totalPages;
-
-      if (recent) {
-        const sample = events.slice(0, 5);
-        recent.innerHTML = sample.length ? sample.map(event => `
-          <div class="camera-card">
-            <div class="split">
-              <div><b>${esc(event.camera || "Unknown camera")}</b><p class="muted">${esc(event.time || "-")}</p></div>
-              <span class="badge ${badgeClass(event.ai_result)}">${esc(event.ai_result || event.status || "-")}</span>
-            </div>
-            <div class="muted">${esc(event.description || event.error || "-")}</div>
-          </div>
-        `).join("") : '<div class="empty">No recent events.</div>';
-      }
     }
 
     async function loadRecordings() {
       const limit = Number($("recordingPageSize").value || 6);
+      const camera = state.selectedCameraIndex >= 0
+        ? cameraName(state.cameras[state.selectedCameraIndex], state.selectedCameraIndex)
+        : $("recordingFilterCamera").value;
       const params = new URLSearchParams({
         page: String(state.recordingsPage),
         limit: String(limit),
-        camera: $("recordingFilterCamera").value,
+        camera,
         date_from: $("recordingDateFrom").value,
         date_to: $("recordingDateTo").value
       });
@@ -1206,7 +1213,7 @@
       for (const id of ["eventFilterCamera", "recordingFilterCamera"]) {
         const select = $(id);
         const current = select.value;
-        select.innerHTML = '<option value="">All cameras</option>';
+        select.innerHTML = '<option value="">Select camera</option>';
         state.cameras.forEach(camera => {
           const name = camera.name || camera.rtsp_url || camera.go2rtc_src;
           if (!name) return;
@@ -1219,6 +1226,61 @@
       }
     }
 
+    function selectCamera(index) {
+      if (index < 0 || index >= state.cameras.length) {
+        showToast("Camera not found.", "err");
+        return;
+      }
+      state.selectedCameraIndex = index;
+      state.eventsPage = 1;
+      state.recordingsPage = 1;
+      const name = cameraName(state.cameras[index], index);
+      $("eventFilterCamera").value = name;
+      $("recordingFilterCamera").value = name;
+      switchView("camera-detail");
+    }
+
+    function renderCameraDetail() {
+      const index = state.selectedCameraIndex;
+      const camera = state.cameras[index];
+      if (!camera) {
+        setText("cameraDetailName", "Camera detail");
+        setText("cameraDetailMeta", "Select a camera to view its timeline.");
+        $("cameraDetailLive").innerHTML = '<div class="empty">No camera selected.</div>';
+        return;
+      }
+      const name = cameraName(camera, index);
+      setText("cameraDetailName", name);
+      setText("cameraDetailMeta", `${camera.enabled ? "Enabled" : "Disabled"} · ${camera.go2rtc_src || camera.rtsp_url || camera.live_url || "No source"}`);
+      $("eventFilterCamera").value = name;
+      $("recordingFilterCamera").value = name;
+
+      const source = liveSource(camera, index);
+      const container = $("cameraDetailLive");
+      container.innerHTML = "";
+      const card = document.createElement("article");
+      card.className = "live-card";
+      card.innerHTML = `<header><strong>${esc(name)}</strong><span class="badge">${esc(source.mode)}</span></header>`;
+      if (source.mode === "iframe") {
+        const frame = document.createElement("iframe");
+        frame.title = name;
+        frame.src = source.url;
+        frame.allow = "autoplay; fullscreen; picture-in-picture";
+        card.appendChild(frame);
+      } else if (source.mode === "img") {
+        const img = document.createElement("img");
+        img.alt = name;
+        img.src = `${source.url}&ts=${Date.now()}`;
+        card.appendChild(img);
+      } else {
+        const empty = document.createElement("div");
+        empty.className = "empty";
+        empty.textContent = "No live source configured.";
+        card.appendChild(empty);
+      }
+      container.appendChild(card);
+    }
+
     function renderCameras() {
       renderDashboard();
       renderCameraFilters();
@@ -1229,7 +1291,7 @@
       }
       grid.innerHTML = state.cameras.map((camera, index) => `
         <article class="camera-card">
-          <div class="camera-title">
+          <div class="camera-title camera-open" data-index="${index}" role="button" tabindex="0">
             <div>
               <h3>${esc(cameraName(camera, index))}</h3>
               <p>${esc(camera.rtsp_url || camera.go2rtc_src || camera.live_url || "No source configured")}</p>
@@ -1241,6 +1303,7 @@
             <span class="badge ${camera.teldrive_record_enabled ? "info" : ""}">Record: ${camera.teldrive_record_enabled ? "On" : "Off"}</span>
           </div>
           <div class="actions">
+            <button class="btn small camera-open-btn" data-index="${index}" type="button">Open detail</button>
             <button class="btn small camera-toggle" data-index="${index}" type="button">${camera.enabled ? "Disable" : "Enable"}</button>
             <button class="btn small camera-snapshot" data-index="${index}" type="button">Snapshot</button>
             <button class="btn small camera-test" data-index="${index}" type="button">Test AI</button>
@@ -1397,12 +1460,20 @@
       const imageBtn = event.target.closest(".view-image");
       if (imageBtn) showViewer(imageBtn.dataset.title || "Image", imageBtn.dataset.url, "image");
 
+      const openCamera = event.target.closest(".camera-open, .camera-open-btn");
+      if (openCamera && !event.target.closest("button:not(.camera-open-btn)")) {
+        selectCamera(Number(openCamera.dataset.index));
+      }
+
       const editCamera = event.target.closest(".camera-edit");
       if (editCamera) openCameraDialog(Number(editCamera.dataset.index));
 
       const deleteCamera = event.target.closest(".camera-delete");
       if (deleteCamera && confirm("Delete this camera?")) {
-        state.cameras.splice(Number(deleteCamera.dataset.index), 1);
+        const index = Number(deleteCamera.dataset.index);
+        state.cameras.splice(index, 1);
+        if (state.selectedCameraIndex === index) state.selectedCameraIndex = -1;
+        else if (state.selectedCameraIndex > index) state.selectedCameraIndex--;
         await saveConfig("actionStatus");
       }
 
@@ -1440,6 +1511,15 @@
         const removed = state.prompts.splice(Number(deletePrompt.dataset.index), 1)[0];
         state.cameras.forEach(camera => { if (camera.prompt_id === removed.id) camera.prompt_id = ""; });
         await saveConfig("configStatus");
+      }
+    });
+
+    document.addEventListener("keydown", event => {
+      const openCamera = event.target.closest && event.target.closest(".camera-open");
+      if (!openCamera) return;
+      if (event.key === "Enter" || event.key === " ") {
+        event.preventDefault();
+        selectCamera(Number(openCamera.dataset.index));
       }
     });
 
@@ -1535,11 +1615,36 @@
     $("stopBtn").addEventListener("click", () => monitorAction("/api/stop", $("stopBtn"), "Monitor stopped"));
     $("quickStopBtn").addEventListener("click", () => monitorAction("/api/stop", $("quickStopBtn"), "Monitor stopped"));
     $("captureBtn").addEventListener("click", () => monitorAction("/api/capture", $("captureBtn"), "Snapshot captured"));
-    $("refreshBtn").addEventListener("click", async () => { await Promise.all([loadStatus(), loadEvents().catch(() => {})]); showToast("Dashboard refreshed", "ok"); });
+    $("refreshBtn").addEventListener("click", async () => {
+      await loadStatus();
+      if ((location.hash || "").includes("camera-detail")) await Promise.all([loadEvents().catch(() => {}), loadRecordings().catch(() => {})]);
+      showToast("Dashboard refreshed", "ok");
+    });
     $("testAiQuickBtn").addEventListener("click", () => $("testAiBtn").click());
 
     $("liveLayoutSelect").addEventListener("change", event => { state.liveLayout = event.target.value; renderLive(); });
     $("refreshLiveBtn").addEventListener("click", renderLive);
+    $("detailSnapshotBtn").addEventListener("click", () => {
+      const index = state.selectedCameraIndex;
+      if (index < 0) return showToast("Select a camera first.", "warn");
+      showViewer(`Snapshot: ${cameraName(state.cameras[index], index)}`, cameraSnapshotUrl(index), "image");
+    });
+    $("detailTestAiBtn").addEventListener("click", async () => {
+      const index = state.selectedCameraIndex;
+      if (index < 0) return showToast("Select a camera first.", "warn");
+      const btn = $("detailTestAiBtn");
+      setBusy(btn, true, "Testing...");
+      try {
+        const data = await api(`/api/test-ai-camera?index=${index}`, { method: "POST", timeout: 150000 });
+        $("toolResult").textContent = JSON.stringify(data, null, 2);
+        showToast(`AI test complete: ${data.result || "done"}`, "ok");
+        await loadEvents();
+      } catch (err) {
+        showToast(err.message, "err");
+      } finally {
+        setBusy(btn, false);
+      }
+    });
 
     $("refreshEventsBtn").addEventListener("click", () => { state.eventsPage = 1; loadEvents().catch(err => showToast(err.message, "err")); });
     $("eventFilterCamera").addEventListener("change", () => { state.eventsPage = 1; loadEvents(); });
@@ -1635,14 +1740,16 @@
       try {
         await loadConfig();
         await loadStatus();
-        await loadEvents();
-        await loadRecordings();
+        if ((location.hash || "").includes("camera-detail")) {
+          await loadEvents();
+          await loadRecordings();
+        }
       } catch (err) {
         showToast(err.message || "Failed to load application data", "err");
       }
       setInterval(() => loadStatus().catch(() => {}), 5000);
       setInterval(() => {
-        if ((location.hash || "#dashboard").includes("events") || (location.hash || "#dashboard").includes("dashboard")) {
+        if ((location.hash || "#dashboard").includes("camera-detail")) {
           loadEvents().catch(() => {});
         }
       }, 15000);

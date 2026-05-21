@@ -79,8 +79,9 @@ def log_event(config: dict[str, Any], status_name: str, image_path: Path | None 
     event = insert_event(status_name, image_path=image_path, save_image=save_local_images, **fields)
     image_file = str(event.get("image_file", ""))
     upload_images = True if camera_config is None else camera_config.get("teldrive_upload_images") is not False
+    should_upload_image = status_name == "verified" and str(fields.get("ai_result", "")).upper() == "EMERGENCY"
     upload_path = DATA_DIR / "event_images" / image_file if image_file else image_path
-    if upload_path and upload_path.exists() and upload_images and teldrive.enabled(config):
+    if upload_path and upload_path.exists() and upload_images and should_upload_image and teldrive.enabled(config):
         camera_name = str(fields.get("camera", "Camera") or "Camera")
         safe_status = "".join(ch for ch in status_name if ch.isalnum() or ch in ("_", "-")) or "event"
         upload_name = image_file or f"{time.strftime('%Y%m%dT%H%M%S')}_{safe_status}.jpg"
@@ -89,6 +90,13 @@ def log_event(config: dict[str, Any], status_name: str, image_path: Path | None 
             args=(config.copy(), upload_path, camera_name, int(event["id"]), upload_name),
             daemon=True,
         ).start()
+
+
+def alert_message(camera_name: str, description: str = "") -> str:
+    message = f"Emergency detected by AI vision.\nCamera: {camera_name}"
+    if description:
+        message += f"\nScene: {description}"
+    return message
 
 
 def upload_event_image_safe(config: dict[str, Any], image_path: Path, camera_name: str, event_id: int, file_name: str | None = None) -> None:
@@ -363,7 +371,7 @@ def process_camera_verification(
             try:
                 send_telegram(
                     image_path,
-                    f"⚠️ AI phát hiện người có thể bị té ngã hoặc gặp nguy hiểm!\nCamera: {camera_name}",
+                    alert_message(camera_name, ai_description),
                     config,
                 )
                 last_alert[alert_key] = now
@@ -543,7 +551,7 @@ def _monitor_loop(config: dict[str, Any]) -> None:
                                 try:
                                     send_telegram(
                                         verify_path,
-                                        f"⚠️ AI phát hiện người có thể bị té ngã hoặc gặp nguy hiểm!\nCamera: {camera_name}",
+                                        alert_message(camera_name, ai_description),
                                         config,
                                     )
                                     last_alert[index] = now

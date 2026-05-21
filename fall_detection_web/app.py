@@ -426,7 +426,7 @@ async def test_telegram(_: str = Depends(auth.require_auth)):
         path = monitor.SNAPSHOT_PATH
         if not path.exists():
             monitor.capture_snapshot(c, path)
-        ai.send_telegram(path, "🔧 Test notification from Fall Detection Web", c)
+        ai.send_telegram(path, "Test notification from Fall Detection Web", c)
         return {"success": True, "message": "Telegram message sent"}
     except Exception as exc:
         raise HTTPException(status_code=400, detail=str(exc))
