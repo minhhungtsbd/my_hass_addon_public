@@ -163,8 +163,46 @@ def go2rtc_source(camera: dict[str, Any]) -> str:
     return value.rstrip("/").split("/")[-1] if parsed.scheme and parsed.path else value
 
 
-def record_go2rtc_clip(config: dict[str, Any], camera: dict[str, Any], output_path: Path) -> Path | None:
+def is_http_url(value: str) -> bool:
+    parsed = urlparse(str(value or "").strip())
+    return parsed.scheme in {"http", "https"} and bool(parsed.netloc)
+
+
+def go2rtc_frame_request(config: dict[str, Any], camera: dict[str, Any]) -> tuple[str, dict[str, str], str]:
+    raw_source = str(camera.get("go2rtc_src") or "").strip()
+    if is_http_url(raw_source):
+        return raw_source, {}, go2rtc_source(camera)
+
     base_url = str(config.get("go2rtc_url", "")).strip().rstrip("/")
+    src = go2rtc_source(camera)
+    if not base_url or not src:
+        raise ValueError("go2rtc URL or camera source is empty")
+    return f"{base_url}/api/frame.jpeg", {"src": src}, src
+
+
+def go2rtc_api_base(config: dict[str, Any], camera: dict[str, Any]) -> str:
+    base_url = str(config.get("go2rtc_url", "")).strip().rstrip("/")
+    if base_url:
+        return base_url
+    raw_source = str(camera.get("go2rtc_src") or "").strip()
+    parsed = urlparse(raw_source)
+    if parsed.scheme in {"http", "https"} and parsed.netloc:
+        path = parsed.path.rstrip("/")
+        if path.endswith("/api/frame.jpeg"):
+            return f"{parsed.scheme}://{parsed.netloc}{path[:-len('/api/frame.jpeg')]}"
+        return f"{parsed.scheme}://{parsed.netloc}"
+    return ""
+
+
+def has_go2rtc_frame_source(config: dict[str, Any], camera: dict[str, Any]) -> bool:
+    raw_source = str(camera.get("go2rtc_src") or "").strip()
+    if is_http_url(raw_source):
+        return True
+    return bool(str(config.get("go2rtc_url", "")).strip() and go2rtc_source(camera))
+
+
+def record_go2rtc_clip(config: dict[str, Any], camera: dict[str, Any], output_path: Path) -> Path | None:
+    base_url = go2rtc_api_base(config, camera)
     src = go2rtc_source(camera)
     if not base_url or not src:
         return None
@@ -316,14 +354,11 @@ def capture_snapshot(config: dict[str, Any], output_path: Path = SNAPSHOT_PATH) 
 
 
 def capture_go2rtc_snapshot(config: dict[str, Any], camera: dict[str, Any], output_path: Path) -> Path:
-    base_url = str(config.get("go2rtc_url", "")).strip().rstrip("/")
-    src = go2rtc_source(camera)
-    if not base_url or not src:
-        raise ValueError("go2rtc URL or camera src is empty")
+    frame_url, params, src = go2rtc_frame_request(config, camera)
     logger.info("[SNAPSHOT] go2rtc src=%s", src)
     response = requests.get(
-        f"{base_url}/api/frame.jpeg",
-        params={"src": src},
+        frame_url,
+        params=params,
         timeout=10,
     )
     response.raise_for_status()
@@ -338,14 +373,11 @@ def read_go2rtc_frame(config: dict[str, Any], camera: dict[str, Any]):
     import cv2
     import numpy as np
 
-    base_url = str(config.get("go2rtc_url", "")).strip().rstrip("/")
-    src = go2rtc_source(camera)
-    if not base_url or not src:
-        raise ValueError("go2rtc URL or camera src is empty")
+    frame_url, params, _src = go2rtc_frame_request(config, camera)
 
     response = requests.get(
-        f"{base_url}/api/frame.jpeg",
-        params={"src": src},
+        frame_url,
+        params=params,
         timeout=8,
     )
     response.raise_for_status()
@@ -361,7 +393,7 @@ def read_go2rtc_frame(config: dict[str, Any], camera: dict[str, Any]):
 def capture_camera_snapshot(config: dict[str, Any], index: int) -> Path:
     camera = get_camera(config, index)
     output_path = camera_snapshot_path(index)
-    if str(config.get("go2rtc_url", "")).strip() and go2rtc_source(camera):
+    if has_go2rtc_frame_source(config, camera):
         try:
             return capture_go2rtc_snapshot(config, camera, output_path)
         except (requests.RequestException, ValueError) as exc:
@@ -455,7 +487,7 @@ def capture_latest_frames(index: int, config: dict[str, Any], camera: dict[str, 
     import cv2
     camera_name = str(camera["name"])
     rtsp_url = str(camera.get("rtsp_url", ""))
-    use_go2rtc = bool(str(config.get("go2rtc_url", "")).strip() and go2rtc_source(camera))
+    use_go2rtc = has_go2rtc_frame_source(config, camera)
     cap = None if use_go2rtc else cv2.VideoCapture(rtsp_url)
     if cap is not None:
         cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
@@ -504,11 +536,10 @@ def capture_latest_frames(index: int, config: dict[str, Any], camera: dict[str, 
 
 def _enabled_monitor_cameras(config: dict[str, Any]) -> list[dict[str, Any]]:
     all_cameras = [camera for camera in normalize_cameras(config) if camera.get("enabled")]
-    has_go2rtc = bool(str(config.get("go2rtc_url", "")).strip())
     return [
         camera
         for camera in all_cameras
-        if camera.get("rtsp_url") or (has_go2rtc and go2rtc_source(camera))
+        if camera.get("rtsp_url") or has_go2rtc_frame_source(config, camera)
     ]
 
 

@@ -321,12 +321,12 @@
     <div class="dialog-body">
       <div class="form-grid">
         <label class="check-row full"><input id="camEnabled" type="checkbox">Enabled</label>
-        <div class="field"><label for="camName">Tên camera / source go2rtc</label><input id="camName" autocomplete="off" placeholder="h9c_cam1"></div>
+        <div class="field"><label for="camName">Tên camera / source go2rtc *</label><input id="camName" autocomplete="off" placeholder="h9c_cam1" required></div>
         <div class="field"><label for="camPrompt">Prompt</label><select id="camPrompt"><option value="">Default prompt</option></select></div>
         <div class="field full">
-          <label for="camGo2rtc">go2rtc frame URL hoặc source</label>
+          <label for="camGo2rtc">go2rtc frame URL hoặc source *</label>
           <input id="camGo2rtc" autocomplete="off" placeholder="h9c_cam1 hoặc https://go2rtc.example/api/frame.jpeg?src=h9c_cam1">
-          <span class="help-text">Nguồn chính để lấy thumbnail, AI snapshot và monitor. Có thể điền source ngắn hoặc URL frame thật của go2rtc.</span>
+          <span class="help-text">Nguồn chính để lấy thumbnail, AI snapshot và monitor. Nếu chỉ nhập source ngắn, Settings phải có go2rtc URL chung. Nếu camera dùng hostname riêng, nhập full frame URL.</span>
         </div>
         <div class="field full">
           <label for="camLive">go2rtc live URL</label>
@@ -393,6 +393,22 @@
       toast.className = `toast ${type === "ok" ? "good" : type === "err" ? "bad" : ""}`;
       toast.classList.remove("hidden");
       setTimeout(() => toast.classList.add("hidden"), 4200);
+    }
+    function isHttpUrl(value) {
+      try {
+        const url = new URL(value);
+        return url.protocol === "http:" || url.protocol === "https:";
+      } catch {
+        return false;
+      }
+    }
+    function validateCamera(camera) {
+      if (!camera.name) return "Tên camera là bắt buộc.";
+      if (!camera.go2rtc_src && !camera.rtsp_url) return "Cần nhập go2rtc frame URL/source hoặc RTSP fallback.";
+      if (camera.go2rtc_src && !isHttpUrl(camera.go2rtc_src) && !state.go2rtcUrl) {
+        return "Bạn đang nhập go2rtc source ngắn. Hãy cấu hình go2rtc URL trong Settings hoặc nhập full frame URL.";
+      }
+      return "";
     }
     async function api(url, options = {}) {
       const res = await fetch(url, options);
@@ -573,8 +589,9 @@
     $("refreshBtn").addEventListener("click", () => loadCameras().then(() => showToast("Cameras reloaded", "ok")).catch(err => showToast(err.message, "err")));
     $("saveBtn").addEventListener("click", async () => {
       const camera = readDialogCamera();
-      if (!camera.name && !camera.rtsp_url && !camera.go2rtc_src && !camera.live_url) {
-        showToast("Camera needs a name or source.", "err");
+      const validation = validateCamera(camera);
+      if (validation) {
+        showToast(validation, "err");
         return;
       }
       if (state.editing >= 0) state.cameras[state.editing] = camera;

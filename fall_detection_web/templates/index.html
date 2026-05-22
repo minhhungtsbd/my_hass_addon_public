@@ -897,7 +897,7 @@
             <div class="panel-head"><div><h3>Phát hiện và xác minh</h3><p>Tham số chung cho YOLO, tần suất gọi AI và gửi cảnh báo.</p></div></div>
             <div class="form-grid three">
               <div class="field"><label for="rtsp_url">RTSP dự phòng</label><input id="rtsp_url" autocomplete="off"><span class="help-text">Chỉ dùng khi chưa có camera riêng.</span></div>
-              <div class="field"><label for="go2rtc_url">go2rtc URL</label><input id="go2rtc_url" autocomplete="off" placeholder="http://127.0.0.1:1984"><span class="help-text">Gợi ý: dùng URL nội bộ go2rtc, ví dụ http://127.0.0.1:1984.</span></div>
+              <div class="field"><label for="go2rtc_url">go2rtc URL chung *</label><input id="go2rtc_url" autocomplete="off" placeholder="http://127.0.0.1:1984"><span class="help-text">Bắt buộc nếu camera chỉ nhập source ngắn như h9c_cam1. Có thể bỏ trống nếu từng camera nhập full frame URL.</span></div>
               <div class="field"><label for="yolo_model">Model YOLO</label><input id="yolo_model" autocomplete="off"><span class="help-text">Mặc định: yolov8n.pt. Nhẹ và phù hợp VPS CPU.</span></div>
               <div class="field"><label for="confidence">Ngưỡng phát hiện người</label><input id="confidence" type="number" min="0.01" max="1" step="0.01"><span class="help-text">Gợi ý: 0.5. Tăng nếu báo nhầm nhiều, giảm nếu bỏ sót.</span></div>
               <div class="field"><label for="yolo_imgsz">Kích thước ảnh YOLO</label><input id="yolo_imgsz" type="number" min="1"><span class="help-text">Gợi ý: 416. Tăng sẽ chính xác hơn nhưng tốn CPU hơn.</span></div>
@@ -984,12 +984,12 @@
     <div class="dialog-body">
       <div class="form-grid">
         <label class="check-row full"><input id="camEnabled" type="checkbox">Enabled</label>
-        <div class="field"><label for="camName">Tên camera / source go2rtc</label><input id="camName" autocomplete="off" placeholder="h9c_cam1"></div>
+        <div class="field"><label for="camName">Tên camera / source go2rtc *</label><input id="camName" autocomplete="off" placeholder="h9c_cam1" required></div>
         <div class="field"><label for="camPrompt">Prompt</label><select id="camPrompt"><option value="">Default prompt</option></select></div>
         <div class="field full">
-          <label for="camGo2rtc">go2rtc frame URL hoặc source</label>
+          <label for="camGo2rtc">go2rtc frame URL hoặc source *</label>
           <input id="camGo2rtc" autocomplete="off" placeholder="h9c_cam1 hoặc https://go2rtc.example/api/frame.jpeg?src=h9c_cam1">
-          <span class="help-text">Nguồn chính để lấy thumbnail, AI snapshot và monitor. Có thể điền source ngắn hoặc URL frame thật của go2rtc.</span>
+          <span class="help-text">Nguồn chính để lấy thumbnail, AI snapshot và monitor. Nếu chỉ nhập source ngắn, Settings phải có go2rtc URL chung. Nếu camera dùng hostname riêng, nhập full frame URL.</span>
         </div>
         <div class="field full">
           <label for="camLive">go2rtc live URL</label>
@@ -1205,6 +1205,32 @@
       $("toastStack").appendChild(toast);
       setTimeout(() => toast.remove(), 4200);
     }
+    function isHttpUrl(value) {
+      try {
+        const url = new URL(value);
+        return url.protocol === "http:" || url.protocol === "https:";
+      } catch {
+        return false;
+      }
+    }
+    function go2rtcSourceFromInput(value) {
+      const text = String(value || "").trim();
+      if (!text) return "";
+      try {
+        const url = new URL(text);
+        return url.searchParams.get("src") || url.pathname.replace(/\/+$/, "").split("/").pop() || "";
+      } catch {
+        return text;
+      }
+    }
+    function validateCamera(camera) {
+      if (!camera.name) return "Tên camera là bắt buộc.";
+      if (!camera.go2rtc_src && !camera.rtsp_url) return "Cần nhập go2rtc frame URL/source hoặc RTSP fallback.";
+      if (camera.go2rtc_src && !isHttpUrl(camera.go2rtc_src) && !String(state.config.go2rtc_url || "").trim()) {
+        return "Bạn đang nhập go2rtc source ngắn. Hãy cấu hình go2rtc URL trong Settings hoặc nhập full frame URL.";
+      }
+      return "";
+    }
     function setBusy(button, busy, text) {
       if (!button) return;
       if (busy) {
@@ -1387,7 +1413,7 @@
     function liveSource(camera, index) {
       const liveMode = camera.live_mode || "auto";
       if (camera.live_url && liveMode !== "snapshot") return { mode: "iframe", url: camera.live_url };
-      const go2rtcSrc = camera.go2rtc_src || camera.name || "";
+      const go2rtcSrc = go2rtcSourceFromInput(camera.go2rtc_src) || camera.name || "";
       if (liveMode === "snapshot" && (go2rtcSrc || camera.rtsp_url)) return { mode: "snapshot", url: cameraSnapshotUrl(index, true) };
       if (state.config.go2rtc_url && go2rtcSrc) return { mode: "iframe", url: go2rtcStreamUrl(go2rtcSrc) };
       if (camera.rtsp_url) return { mode: "img", url: `/api/camera/video?index=${index}` };
@@ -1921,8 +1947,9 @@
         record_seconds: Math.max(1, Number($("camRecordSeconds").value || 10)),
         record_cooldown: Math.max(1, Number($("camRecordCooldown").value || 300))
       };
-      if (!camera.name && !camera.rtsp_url && !camera.go2rtc_src && !camera.live_url) {
-        showToast("Camera needs a name or source.", "warn");
+      const validation = validateCamera(camera);
+      if (validation) {
+        showToast(validation, "warn");
         return;
       }
       if (state.editingCamera >= 0) state.cameras[state.editingCamera] = camera;

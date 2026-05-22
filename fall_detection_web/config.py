@@ -118,6 +118,11 @@ def normalize_go2rtc_source(value: Any) -> str:
     return text.rstrip("/").split("/")[-1] if parsed.scheme and parsed.path else text
 
 
+def is_url(value: Any) -> bool:
+    parsed = urlparse(str(value or "").strip())
+    return parsed.scheme in {"http", "https"} and bool(parsed.netloc)
+
+
 # ──────────────────────────────────────────────
 # Helpers
 # ──────────────────────────────────────────────
@@ -259,7 +264,7 @@ def normalize_cameras(config: dict[str, Any]) -> list[dict[str, Any]]:
             "enabled": cam.get("enabled") is not False,
             "name": str(cam.get("name", "")).strip() or f"Camera {i + 1}",
             "rtsp_url": str(cam.get("rtsp_url", "")).strip(),
-            "go2rtc_src": normalize_go2rtc_source(cam.get("go2rtc_src", "")),
+            "go2rtc_src": str(cam.get("go2rtc_src", "")).strip(),
             "live_url": str(cam.get("live_url", "")).strip(),
             "live_mode": str(cam.get("live_mode", "auto")).strip() if str(cam.get("live_mode", "auto")).strip() in {"auto", "iframe", "snapshot"} else "auto",
             "prompt_id": str(cam.get("prompt_id", "")).strip(),
@@ -377,6 +382,6 @@ def get_camera(config: dict[str, Any], index: int) -> dict[str, Any]:
 
 def has_camera_snapshot_source(config: dict[str, Any], camera: dict[str, Any]) -> bool:
     go2rtc_src = normalize_go2rtc_source(camera.get("go2rtc_src") or camera.get("name") or "")
-    if str(config.get("go2rtc_url", "")).strip() and go2rtc_src:
+    if (str(config.get("go2rtc_url", "")).strip() or is_url(camera.get("go2rtc_src"))) and go2rtc_src:
         return True
     return bool(str(camera.get("rtsp_url", "")).strip())
