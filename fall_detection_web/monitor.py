@@ -316,6 +316,30 @@ def capture_go2rtc_snapshot(config: dict[str, Any], camera: dict[str, Any], outp
     return output_path
 
 
+def read_go2rtc_frame(config: dict[str, Any], camera: dict[str, Any]):
+    import cv2
+    import numpy as np
+
+    base_url = str(config.get("go2rtc_url", "")).strip().rstrip("/")
+    src = str(camera.get("go2rtc_src", "")).strip()
+    if not base_url or not src:
+        raise ValueError("go2rtc URL or camera src is empty")
+
+    response = requests.get(
+        f"{base_url}/api/frame.jpeg",
+        params={"src": src},
+        timeout=8,
+    )
+    response.raise_for_status()
+    if not response.content:
+        raise RuntimeError("go2rtc returned empty frame")
+    image = np.frombuffer(response.content, dtype=np.uint8)
+    frame = cv2.imdecode(image, cv2.IMREAD_COLOR)
+    if frame is None:
+        raise RuntimeError("Could not decode go2rtc JPEG frame")
+    return frame
+
+
 def capture_camera_snapshot(config: dict[str, Any], index: int) -> Path:
     camera = get_camera(config, index)
     output_path = camera_snapshot_path(index)
@@ -409,51 +433,79 @@ def process_camera_verification(
     }
 
 
-def capture_latest_frames(index: int, camera: dict[str, Any], holder: dict[str, Any], lock: threading.Lock) -> None:
+def capture_latest_frames(index: int, config: dict[str, Any], camera: dict[str, Any], holder: dict[str, Any], lock: threading.Lock) -> None:
     import cv2
     camera_name = str(camera["name"])
-    rtsp_url = str(camera["rtsp_url"])
-    cap = cv2.VideoCapture(rtsp_url)
-    cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+    rtsp_url = str(camera.get("rtsp_url", ""))
+    use_go2rtc = bool(str(config.get("go2rtc_url", "")).strip() and str(camera.get("go2rtc_src", "")).strip())
+    cap = None if use_go2rtc else cv2.VideoCapture(rtsp_url)
+    if cap is not None:
+        cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
     last_reconnect_event = 0.0
 
     try:
         while not stop_event.is_set():
-            ok, frame = cap.read()
+            if use_go2rtc:
+                try:
+                    frame = read_go2rtc_frame(config, camera)
+                    ok = True
+                except Exception as exc:
+                    ok = False
+                    frame = None
+                    last_error = str(exc)
+            else:
+                ok, frame = cap.read()
+                last_error = "RTSP read failed"
             if not ok:
                 now = time.time()
                 if now - last_reconnect_event > 30:
-                    logger.warning("[RTSP] reconnect stream camera=%s", camera_name)
-                    set_state(last_error=f"RTSP read failed for {camera_name}, reconnecting", last_camera=camera_name)
-                    insert_event("rtsp_reconnect", camera=camera_name, message="RTSP read failed")
+                    source = "go2rtc" if use_go2rtc else "RTSP"
+                    logger.warning("[%s] reconnect stream camera=%s error=%s", source.upper(), camera_name, last_error)
+                    set_state(last_error=f"{source} read failed for {camera_name}, reconnecting", last_camera=camera_name)
+                    insert_event("stream_reconnect", camera=camera_name, message=last_error)
                     last_reconnect_event = now
-                cap.release()
+                if cap is not None:
+                    cap.release()
                 time.sleep(0.5)
-                cap = cv2.VideoCapture(rtsp_url)
-                cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+                if not use_go2rtc:
+                    cap = cv2.VideoCapture(rtsp_url)
+                    cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
                 continue
 
             with lock:
                 holder["frame"] = frame
                 holder["time"] = time.time()
                 holder["seq"] = int(holder.get("seq", 0)) + 1
+
+            if use_go2rtc:
+                time.sleep(float(config.get("loop_sleep", 0.2)))
     finally:
-        cap.release()
+        if cap is not None:
+            cap.release()
+
+
+def _enabled_monitor_cameras(config: dict[str, Any]) -> list[dict[str, Any]]:
+    all_cameras = [camera for camera in normalize_cameras(config) if camera.get("enabled")]
+    has_go2rtc = bool(str(config.get("go2rtc_url", "")).strip())
+    return [
+        camera
+        for camera in all_cameras
+        if camera.get("rtsp_url") or (has_go2rtc and camera.get("go2rtc_src"))
+    ]
 
 
 def _enabled_rtsp_cameras(config: dict[str, Any]) -> list[dict[str, Any]]:
-    all_cameras = [camera for camera in normalize_cameras(config) if camera.get("enabled")]
-    return [camera for camera in all_cameras if camera.get("rtsp_url")]
+    return _enabled_monitor_cameras(config)
 
 
 def has_enabled_rtsp_camera(config: dict[str, Any]) -> bool:
-    return bool(_enabled_rtsp_cameras(config))
+    return bool(_enabled_monitor_cameras(config))
 
 
 def _monitor_loop(config: dict[str, Any]) -> None:
-    cameras = _enabled_rtsp_cameras(config)
+    cameras = _enabled_monitor_cameras(config)
     if not cameras:
-        message = "No enabled cameras with RTSP URLs"
+        message = "No enabled cameras with RTSP URLs or go2rtc sources"
         set_state(running=False, last_error=message)
         logger.warning("[MONITOR] %s", message)
         return
@@ -470,7 +522,7 @@ def _monitor_loop(config: dict[str, Any]) -> None:
     capture_threads = [
         threading.Thread(
             target=capture_latest_frames,
-            args=(index, camera, frame_holders[index], frame_locks[index]),
+            args=(index, config, camera, frame_holders[index], frame_locks[index]),
             daemon=True,
         )
         for index, camera in enumerate(cameras)
@@ -598,8 +650,8 @@ def start_monitor(config: dict[str, Any]) -> str:
     with monitor_lock:
         if worker_thread and worker_thread.is_alive():
             return "already running"
-        if not _enabled_rtsp_cameras(config):
-            message = "No enabled cameras with RTSP URLs"
+        if not _enabled_monitor_cameras(config):
+            message = "No enabled cameras with RTSP URLs or go2rtc sources"
             set_state(running=False, last_error=message)
             raise ValueError(message)
         stop_event.clear()
@@ -632,9 +684,9 @@ def restart_monitor(config: dict[str, Any]) -> None:
             insert_event("restart_error", error=message)
             raise RuntimeError(message)
         worker_thread = None
-        cameras = _enabled_rtsp_cameras(config)
+        cameras = _enabled_monitor_cameras(config)
         if not cameras:
-            message = "Monitor stopped because no enabled cameras with RTSP URLs remain"
+            message = "Monitor stopped because no enabled cameras with RTSP URLs or go2rtc sources remain"
             set_state(running=False, last_error=message)
             insert_event("config_applied", message=message)
             return
