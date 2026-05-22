@@ -422,6 +422,31 @@
       border-radius: 0;
       background: transparent;
     }
+    .thumb-refresh {
+      position: absolute;
+      top: 8px;
+      right: 8px;
+      width: 32px;
+      height: 32px;
+      border: 1px solid rgba(148, 163, 184, .42);
+      border-radius: 8px;
+      background: rgba(2, 6, 23, .72);
+      color: var(--text);
+      display: grid;
+      place-items: center;
+      cursor: pointer;
+      opacity: .86;
+      transition: transform .16s ease, opacity .16s ease, border-color .16s ease, background .16s ease;
+      z-index: 2;
+    }
+    .thumb-refresh:hover {
+      opacity: 1;
+      transform: translateY(-1px);
+      border-color: rgba(56, 189, 248, .76);
+      background: rgba(15, 23, 42, .92);
+    }
+    .thumb-refresh:disabled { opacity: .48; cursor: wait; transform: none; }
+    .thumb-refresh svg { width: 16px; height: 16px; }
     .camera-meta-stack {
       display: grid;
       grid-template-columns: repeat(2, minmax(112px, 178px));
@@ -1612,7 +1637,7 @@
         <article class="camera-card camera-list-card">
           <div class="camera-thumb camera-open" data-index="${index}" role="button" tabindex="0">
             ${camera.rtsp_url || camera.go2rtc_src
-              ? `<img src="${esc(cameraSnapshotUrl(index))}" loading="lazy" alt="${esc(cameraName(camera, index))} snapshot" onerror="this.replaceWith(Object.assign(document.createElement('div'), {className: 'empty', textContent: 'Snapshot unavailable'}))">`
+              ? `<img src="${esc(cameraSnapshotUrl(index))}" loading="lazy" alt="${esc(cameraName(camera, index))} snapshot" onerror="this.replaceWith(Object.assign(document.createElement('div'), {className: 'empty', textContent: 'Snapshot unavailable'}))"><button class="thumb-refresh camera-thumb-refresh" data-index="${index}" type="button" title="Refresh thumbnail" aria-label="Refresh ${esc(cameraName(camera, index))} thumbnail">${icons.refresh}</button>`
               : '<div class="empty">No snapshot source</div>'}
           </div>
           <div class="camera-card-main">
@@ -1802,6 +1827,24 @@
         const idx = Number(toggleCamera.dataset.index);
         state.cameras[idx].enabled = !state.cameras[idx].enabled;
         await saveConfig("actionStatus");
+      }
+
+      const thumbRefresh = event.target.closest(".camera-thumb-refresh");
+      if (thumbRefresh) {
+        event.preventDefault();
+        event.stopPropagation();
+        const index = Number(thumbRefresh.dataset.index);
+        const thumb = thumbRefresh.closest(".camera-thumb");
+        const img = thumb ? thumb.querySelector("img") : null;
+        if (!img) return;
+        setBusy(thumbRefresh, true);
+        img.src = cameraSnapshotUrl(index, true);
+        img.onload = () => setBusy(thumbRefresh, false);
+        img.onerror = () => {
+          setBusy(thumbRefresh, false);
+          showToast("Snapshot refresh failed.", "err");
+        };
+        return;
       }
 
       const snapshot = event.target.closest(".camera-snapshot");
