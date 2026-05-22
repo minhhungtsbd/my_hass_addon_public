@@ -595,6 +595,7 @@ def _monitor_loop(config: dict[str, Any]) -> None:
     last_verify = [0.0 for _ in cameras]
     last_alert: dict[int | str, float] = {index: 0.0 for index in range(len(cameras))}
     last_record = [0.0 for _ in cameras]
+    last_yolo_log = [0.0 for _ in cameras]
     total_frames = 0
     set_state(running=True, started_at=now_iso(), last_error="", mode="yolo")
     for thread in capture_threads:
@@ -622,6 +623,8 @@ def _monitor_loop(config: dict[str, Any]) -> None:
                 now = time.time()
                 person_detected = False
                 best_confidence = 0.0
+                person_count = 0
+                infer_start = time.perf_counter()
                 
                 results = model.predict(
                     frame,
@@ -634,7 +637,20 @@ def _monitor_loop(config: dict[str, Any]) -> None:
                     for box in result.boxes:
                         if int(box.cls[0]) == 0:
                             person_detected = True
+                            person_count += 1
                             best_confidence = max(best_confidence, float(box.conf[0]))
+                infer_ms = (time.perf_counter() - infer_start) * 1000
+
+                if person_detected or now - last_yolo_log[index] > 10:
+                    logger.info(
+                        "[YOLO] camera=%s people=%s best=%.2f infer=%.0fms frame=%s",
+                        camera_name,
+                        person_count,
+                        best_confidence,
+                        infer_ms,
+                        frame_counts[index],
+                    )
+                    last_yolo_log[index] = now
 
                 if person_detected:
                     set_state(last_person_confidence=best_confidence, last_error="", last_camera=camera_name)
