@@ -185,6 +185,8 @@ def fetch_go2rtc_frame_bytes(config: dict[str, Any], camera: dict[str, Any], tim
     headers = {
         "Accept": "image/jpeg,image/*;q=0.9,*/*;q=0.8",
         "Cache-Control": "no-cache",
+        "Pragma": "no-cache",
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126 Safari/537.36",
     }
     last_error = ""
     for attempt in range(1, attempts + 1):
@@ -200,7 +202,8 @@ def fetch_go2rtc_frame_bytes(config: dict[str, Any], camera: dict[str, Any], tim
             response.raise_for_status()
             if response.content:
                 return response.content, src
-            last_error = "empty response body"
+            content_type = response.headers.get("content-type", "")
+            last_error = f"empty response body status={response.status_code} content-type={content_type}"
         except requests.RequestException as exc:
             last_error = str(exc)
         if attempt < attempts:
