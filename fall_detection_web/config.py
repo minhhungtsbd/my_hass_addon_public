@@ -16,6 +16,7 @@ import logging
 import os
 from pathlib import Path
 from typing import Any
+from urllib.parse import parse_qs, urlparse
 
 ROOT = Path(__file__).resolve().parent
 DATA_DIR = ROOT / "data"
@@ -103,6 +104,18 @@ ENV_CONFIG_KEYS: dict[str, str] = {
 _INT_KEYS = {"yolo_imgsz", "verify_interval", "alert_cooldown", "frame_skip", "teldrive_record_seconds", "teldrive_record_cooldown"}
 _FLOAT_KEYS = {"confidence", "loop_sleep"}
 _BOOL_KEYS = {"teldrive_enabled", "teldrive_upload_images", "teldrive_record_enabled"}
+
+
+def normalize_go2rtc_source(value: Any) -> str:
+    text = str(value or "").strip()
+    if not text:
+        return ""
+    parsed = urlparse(text)
+    if parsed.query:
+        src = parse_qs(parsed.query).get("src", [""])[0]
+        if src:
+            return src.strip()
+    return text.rstrip("/").split("/")[-1] if parsed.scheme and parsed.path else text
 
 
 # ──────────────────────────────────────────────
@@ -246,7 +259,7 @@ def normalize_cameras(config: dict[str, Any]) -> list[dict[str, Any]]:
             "enabled": cam.get("enabled") is not False,
             "name": str(cam.get("name", "")).strip() or f"Camera {i + 1}",
             "rtsp_url": str(cam.get("rtsp_url", "")).strip(),
-            "go2rtc_src": str(cam.get("go2rtc_src", "")).strip(),
+            "go2rtc_src": normalize_go2rtc_source(cam.get("go2rtc_src", "")),
             "live_url": str(cam.get("live_url", "")).strip(),
             "live_mode": str(cam.get("live_mode", "auto")).strip() if str(cam.get("live_mode", "auto")).strip() in {"auto", "iframe", "snapshot"} else "auto",
             "prompt_id": str(cam.get("prompt_id", "")).strip(),
@@ -363,7 +376,7 @@ def get_camera(config: dict[str, Any], index: int) -> dict[str, Any]:
 
 
 def has_camera_snapshot_source(config: dict[str, Any], camera: dict[str, Any]) -> bool:
-    go2rtc_src = str(camera.get("go2rtc_src") or camera.get("name") or "").strip()
+    go2rtc_src = normalize_go2rtc_source(camera.get("go2rtc_src") or camera.get("name") or "")
     if str(config.get("go2rtc_url", "")).strip() and go2rtc_src:
         return True
     return bool(str(camera.get("rtsp_url", "")).strip())

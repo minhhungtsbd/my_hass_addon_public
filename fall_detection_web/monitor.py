@@ -10,6 +10,7 @@ import threading
 import time
 from pathlib import Path
 from typing import Any
+from urllib.parse import parse_qs, urlparse
 
 import requests
 
@@ -150,7 +151,16 @@ def safe_camera_name(camera_name: str) -> str:
 
 
 def go2rtc_source(camera: dict[str, Any]) -> str:
-    return str(camera.get("go2rtc_src") or camera.get("name") or "").strip()
+    value = str(camera.get("go2rtc_src") or camera.get("name") or "").strip()
+    if not value:
+        return ""
+    parsed = urlparse(value)
+    if parsed.query:
+        query = parse_qs(parsed.query)
+        src = query.get("src", [""])[0]
+        if src:
+            return src.strip()
+    return value.rstrip("/").split("/")[-1] if parsed.scheme and parsed.path else value
 
 
 def record_go2rtc_clip(config: dict[str, Any], camera: dict[str, Any], output_path: Path) -> Path | None:

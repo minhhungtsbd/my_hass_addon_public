@@ -984,11 +984,23 @@
     <div class="dialog-body">
       <div class="form-grid">
         <label class="check-row full"><input id="camEnabled" type="checkbox">Enabled</label>
-        <div class="field"><label for="camName">Name</label><input id="camName" autocomplete="off"></div>
+        <div class="field"><label for="camName">Tên camera / source go2rtc</label><input id="camName" autocomplete="off" placeholder="h9c_cam1"></div>
         <div class="field"><label for="camPrompt">Prompt</label><select id="camPrompt"><option value="">Default prompt</option></select></div>
-        <div class="field full"><label for="camRtsp">RTSP URL</label><input id="camRtsp" autocomplete="off"></div>
-        <div class="field"><label for="camGo2rtc">go2rtc src</label><input id="camGo2rtc" autocomplete="off"></div>
-        <div class="field"><label for="camLive">Live URL</label><input id="camLive" autocomplete="off"></div>
+        <div class="field full">
+          <label for="camGo2rtc">go2rtc frame URL hoặc source</label>
+          <input id="camGo2rtc" autocomplete="off" placeholder="h9c_cam1 hoặc https://go2rtc.example/api/frame.jpeg?src=h9c_cam1">
+          <span class="help-text">Nguồn chính để lấy thumbnail, AI snapshot và monitor. Có thể điền source ngắn hoặc URL frame thật của go2rtc.</span>
+        </div>
+        <div class="field full">
+          <label for="camLive">go2rtc live URL</label>
+          <input id="camLive" autocomplete="off" placeholder="https://go2rtc.example/stream.html?src=h9c_cam1">
+          <span class="help-text">Tuỳ chọn. Nếu trống, web tự tạo live URL từ go2rtc URL chung và source.</span>
+        </div>
+        <div class="field full">
+          <label for="camRtsp">RTSP URL Camera (fallback)</label>
+          <input id="camRtsp" autocomplete="off" placeholder="rtsp://10.10.0.2:8554/h9c_cam1">
+          <span class="help-text">Chỉ dùng dự phòng khi không có go2rtc. Với HEVC/H.265 nên ưu tiên go2rtc để tránh live đen và log decode.</span>
+        </div>
         <div class="field full">
           <label for="camLiveMode">Chế độ live</label>
           <select id="camLiveMode">
