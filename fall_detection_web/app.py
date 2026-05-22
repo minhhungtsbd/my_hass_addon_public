@@ -461,6 +461,21 @@ async def get_cameras_snapshot(index: int, refresh: bool = False, _: str = Depen
 
 def camera_snapshot_response(index: int, refresh: bool = False) -> Response:
     c = config.read_config()
+    camera = config.get_camera(c, index)
+    if monitor.has_go2rtc_frame_source(c, camera):
+        try:
+            content, src = monitor.fetch_go2rtc_frame_bytes(c, camera, timeout=10, attempts=4)
+            return Response(
+                content=content,
+                media_type="image/jpeg",
+                headers={
+                    "Cache-Control": "private, max-age=10, no-cache",
+                    "X-Camera-Frame-Source": src,
+                },
+            )
+        except Exception as exc:
+            logger.warning("[SNAPSHOT] go2rtc thumbnail failed camera=%s: %s", camera.get("name", index), exc)
+
     path = monitor.camera_snapshot_path(index)
     if refresh or not path.exists():
         path = monitor.capture_camera_snapshot(c, index)
