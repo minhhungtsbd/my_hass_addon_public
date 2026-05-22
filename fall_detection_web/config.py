@@ -362,6 +362,7 @@ def get_camera(config: dict[str, Any], index: int) -> dict[str, Any]:
 
 
 def has_camera_snapshot_source(config: dict[str, Any], camera: dict[str, Any]) -> bool:
-    if str(config.get("go2rtc_url", "")).strip() and str(camera.get("go2rtc_src", "")).strip():
+    go2rtc_src = str(camera.get("go2rtc_src") or camera.get("name") or "").strip()
+    if str(config.get("go2rtc_url", "")).strip() and go2rtc_src:
         return True
     return bool(str(camera.get("rtsp_url", "")).strip())

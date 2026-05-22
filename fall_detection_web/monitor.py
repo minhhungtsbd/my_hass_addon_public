@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import os
 import shutil
 import subprocess
 import threading
@@ -11,6 +12,9 @@ from pathlib import Path
 from typing import Any
 
 import requests
+
+os.environ.setdefault("OPENCV_FFMPEG_LOGLEVEL", "-8")
+os.environ.setdefault("OPENCV_LOG_LEVEL", "ERROR")
 
 from ai import send_telegram, verify_scene
 from config import get_camera, normalize_cameras, require_config
@@ -145,9 +149,13 @@ def safe_camera_name(camera_name: str) -> str:
     return "".join(ch if ch.isalnum() or ch in ("-", "_") else "_" for ch in camera_name) or "camera"
 
 
+def go2rtc_source(camera: dict[str, Any]) -> str:
+    return str(camera.get("go2rtc_src") or camera.get("name") or "").strip()
+
+
 def record_go2rtc_clip(config: dict[str, Any], camera: dict[str, Any], output_path: Path) -> Path | None:
     base_url = str(config.get("go2rtc_url", "")).strip().rstrip("/")
-    src = str(camera.get("go2rtc_src", "")).strip()
+    src = go2rtc_source(camera)
     if not base_url or not src:
         return None
 
@@ -299,7 +307,7 @@ def capture_snapshot(config: dict[str, Any], output_path: Path = SNAPSHOT_PATH) 
 
 def capture_go2rtc_snapshot(config: dict[str, Any], camera: dict[str, Any], output_path: Path) -> Path:
     base_url = str(config.get("go2rtc_url", "")).strip().rstrip("/")
-    src = str(camera.get("go2rtc_src", "")).strip()
+    src = go2rtc_source(camera)
     if not base_url or not src:
         raise ValueError("go2rtc URL or camera src is empty")
     logger.info("[SNAPSHOT] go2rtc src=%s", src)
@@ -321,7 +329,7 @@ def read_go2rtc_frame(config: dict[str, Any], camera: dict[str, Any]):
     import numpy as np
 
     base_url = str(config.get("go2rtc_url", "")).strip().rstrip("/")
-    src = str(camera.get("go2rtc_src", "")).strip()
+    src = go2rtc_source(camera)
     if not base_url or not src:
         raise ValueError("go2rtc URL or camera src is empty")
 
@@ -343,7 +351,7 @@ def read_go2rtc_frame(config: dict[str, Any], camera: dict[str, Any]):
 def capture_camera_snapshot(config: dict[str, Any], index: int) -> Path:
     camera = get_camera(config, index)
     output_path = camera_snapshot_path(index)
-    if str(config.get("go2rtc_url", "")).strip() and str(camera.get("go2rtc_src", "")).strip():
+    if str(config.get("go2rtc_url", "")).strip() and go2rtc_source(camera):
         try:
             return capture_go2rtc_snapshot(config, camera, output_path)
         except (requests.RequestException, ValueError) as exc:
@@ -437,7 +445,7 @@ def capture_latest_frames(index: int, config: dict[str, Any], camera: dict[str, 
     import cv2
     camera_name = str(camera["name"])
     rtsp_url = str(camera.get("rtsp_url", ""))
-    use_go2rtc = bool(str(config.get("go2rtc_url", "")).strip() and str(camera.get("go2rtc_src", "")).strip())
+    use_go2rtc = bool(str(config.get("go2rtc_url", "")).strip() and go2rtc_source(camera))
     cap = None if use_go2rtc else cv2.VideoCapture(rtsp_url)
     if cap is not None:
         cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
@@ -490,7 +498,7 @@ def _enabled_monitor_cameras(config: dict[str, Any]) -> list[dict[str, Any]]:
     return [
         camera
         for camera in all_cameras
-        if camera.get("rtsp_url") or (has_go2rtc and camera.get("go2rtc_src"))
+        if camera.get("rtsp_url") or (has_go2rtc and go2rtc_source(camera))
     ]
 
 

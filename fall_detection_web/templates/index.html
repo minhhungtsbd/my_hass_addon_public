@@ -1323,7 +1323,8 @@
     }
     function liveSource(camera, index) {
       if (camera.live_url) return { mode: "iframe", url: camera.live_url };
-      if (state.config.go2rtc_url && camera.go2rtc_src) return { mode: "iframe", url: go2rtcStreamUrl(camera.go2rtc_src) };
+      const go2rtcSrc = camera.go2rtc_src || camera.name || "";
+      if (state.config.go2rtc_url && go2rtcSrc) return { mode: "iframe", url: go2rtcStreamUrl(go2rtcSrc) };
       if (camera.rtsp_url) return { mode: "img", url: `/api/camera/video?index=${index}` };
       return { mode: "empty", url: "" };
     }
