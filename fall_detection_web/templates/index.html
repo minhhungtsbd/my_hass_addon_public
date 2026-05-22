@@ -1363,7 +1363,7 @@
       if (refresh || !cached || cached.signature !== signature) {
         state.snapshotUrls[index] = {
           signature,
-          url: `/api/camera/snapshot?index=${index}&v=${Date.now()}`
+          url: `/api/camera/snapshot?index=${index}${refresh ? "&refresh=1" : ""}&v=${Date.now()}`
         };
       }
       return state.snapshotUrls[index].url;

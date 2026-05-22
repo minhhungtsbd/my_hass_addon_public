@@ -402,10 +402,12 @@ async def capture(_: str = Depends(auth.require_auth)):
         raise HTTPException(status_code=400, detail=str(exc))
 
 @app.get("/api/camera/snapshot")
-async def get_camera_snapshot(index: int, _: str = Depends(auth.require_auth)):
+async def get_camera_snapshot(index: int, refresh: bool = False, _: str = Depends(auth.require_auth)):
     try:
         c = config.read_config()
-        path = monitor.capture_camera_snapshot(c, index)
+        path = monitor.camera_snapshot_path(index)
+        if refresh or not path.exists():
+            path = monitor.capture_camera_snapshot(c, index)
         return Response(
             content=path.read_bytes(),
             media_type="image/jpeg",
