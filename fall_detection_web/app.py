@@ -406,7 +406,11 @@ async def get_camera_snapshot(index: int, _: str = Depends(auth.require_auth)):
     try:
         c = config.read_config()
         path = monitor.capture_camera_snapshot(c, index)
-        return Response(content=path.read_bytes(), media_type="image/jpeg")
+        return Response(
+            content=path.read_bytes(),
+            media_type="image/jpeg",
+            headers={"Cache-Control": "private, max-age=120"},
+        )
     except Exception as exc:
         raise HTTPException(status_code=400, detail=str(exc))
 

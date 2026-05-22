@@ -1082,7 +1082,8 @@
       editingCamera: -1,
       editingPrompt: -1,
       viewerUrl: "",
-      viewerMode: "image"
+      viewerMode: "image",
+      snapshotUrls: {}
     };
 
     const pages = {
@@ -1316,7 +1317,21 @@
       const prompt = state.prompts.find(item => item.id === id);
       return prompt ? prompt.title || "Untitled prompt" : "Default prompt";
     }
-    function cameraSnapshotUrl(index) { return `/api/camera/snapshot?index=${index}&ts=${Date.now()}`; }
+    function cameraSnapshotSignature(camera, index) {
+      return [index, cameraName(camera, index), camera.rtsp_url || "", camera.go2rtc_src || "", camera.live_url || ""].join("|");
+    }
+    function cameraSnapshotUrl(index, refresh = false) {
+      const camera = state.cameras[index] || {};
+      const signature = cameraSnapshotSignature(camera, index);
+      const cached = state.snapshotUrls[index];
+      if (refresh || !cached || cached.signature !== signature) {
+        state.snapshotUrls[index] = {
+          signature,
+          url: `/api/camera/snapshot?index=${index}&v=${Date.now()}`
+        };
+      }
+      return state.snapshotUrls[index].url;
+    }
     function go2rtcStreamUrl(src) {
       const base = String(state.config.go2rtc_url || "").replace(/\/$/, "");
       return `${base}/stream.html?src=${encodeURIComponent(src)}&mode=mse`;
@@ -1769,7 +1784,7 @@
       }
 
       const snapshot = event.target.closest(".camera-snapshot");
-      if (snapshot) showViewer(`Snapshot: ${cameraName(state.cameras[Number(snapshot.dataset.index)], Number(snapshot.dataset.index))}`, cameraSnapshotUrl(Number(snapshot.dataset.index)), "image");
+      if (snapshot) showViewer(`Snapshot: ${cameraName(state.cameras[Number(snapshot.dataset.index)], Number(snapshot.dataset.index))}`, cameraSnapshotUrl(Number(snapshot.dataset.index), true), "image");
 
       const test = event.target.closest(".camera-test");
       if (test) {
@@ -1918,7 +1933,7 @@
     $("detailSnapshotBtn").addEventListener("click", () => {
       const index = state.selectedCameraIndex;
       if (index < 0) return showToast("Select a camera first.", "warn");
-      showViewer(`Snapshot: ${cameraName(state.cameras[index], index)}`, cameraSnapshotUrl(index), "image");
+      showViewer(`Snapshot: ${cameraName(state.cameras[index], index)}`, cameraSnapshotUrl(index, true), "image");
     });
     $("detailTestAiBtn").addEventListener("click", async () => {
       const index = state.selectedCameraIndex;
