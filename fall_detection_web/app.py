@@ -133,6 +133,11 @@ async def index_page(request: Request, _: str = Depends(auth.require_auth)):
     return templates.TemplateResponse(request=request, name="index.html", context={})
 
 
+@app.get("/cameras", response_class=HTMLResponse)
+async def cameras_page(request: Request, _: str = Depends(auth.require_auth)):
+    return templates.TemplateResponse(request=request, name="cameras.html", context={})
+
+
 @app.get("/camera/{camera_name:path}", response_class=HTMLResponse)
 async def camera_page(request: Request, camera_name: str, _: str = Depends(auth.require_auth)):
     if not camera_name.strip():
@@ -142,7 +147,7 @@ async def camera_page(request: Request, camera_name: str, _: str = Depends(auth.
 
 @app.get("/{page_name}", response_class=HTMLResponse)
 async def app_page(request: Request, page_name: str, _: str = Depends(auth.require_auth)):
-    if page_name not in {"dashboard", "cameras", "prompts", "live", "settings", "tools"}:
+    if page_name not in {"dashboard", "prompts", "live", "settings", "tools"}:
         raise HTTPException(status_code=404, detail="Page not found")
     return templates.TemplateResponse(request=request, name="index.html", context={})
 
@@ -269,6 +274,43 @@ async def save_config(new_config: dict[str, Any] = Body(...), _: str = Depends(a
         else:
             message = "Settings saved"
         return {"success": True, "config": updated, "message": message}
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+
+@app.get("/api/cameras")
+async def get_cameras(_: str = Depends(auth.require_auth)):
+    c = config.read_config()
+    return {
+        "success": True,
+        "cameras": c.get("cameras", []),
+        "prompts": c.get("prompts", []),
+        "go2rtc_url": c.get("go2rtc_url", ""),
+    }
+
+
+@app.post("/api/cameras")
+async def save_cameras(payload: dict[str, Any] = Body(...), _: str = Depends(auth.require_auth)):
+    try:
+        current = config.read_config()
+        current["cameras"] = payload.get("cameras", [])
+        updated = config.write_config(current)
+        state = monitor.read_state()
+        if state.get("running"):
+            monitor.restart_monitor(updated)
+            message = "Cameras saved and monitor restarted"
+        elif monitor.has_enabled_rtsp_camera(updated):
+            result = monitor.start_monitor(updated)
+            message = "Cameras saved and monitor started" if result == "started" else f"Cameras saved and monitor {result}"
+        else:
+            message = "Cameras saved"
+        return {
+            "success": True,
+            "message": message,
+            "cameras": updated.get("cameras", []),
+            "prompts": updated.get("prompts", []),
+            "go2rtc_url": updated.get("go2rtc_url", ""),
+        }
     except Exception as exc:
         raise HTTPException(status_code=400, detail=str(exc))
 
@@ -404,17 +446,30 @@ async def capture(_: str = Depends(auth.require_auth)):
 @app.get("/api/camera/snapshot")
 async def get_camera_snapshot(index: int, refresh: bool = False, _: str = Depends(auth.require_auth)):
     try:
-        c = config.read_config()
-        path = monitor.camera_snapshot_path(index)
-        if refresh or not path.exists():
-            path = monitor.capture_camera_snapshot(c, index)
-        return Response(
-            content=path.read_bytes(),
-            media_type="image/jpeg",
-            headers={"Cache-Control": "private, max-age=120"},
-        )
+        return camera_snapshot_response(index, refresh)
     except Exception as exc:
         raise HTTPException(status_code=400, detail=str(exc))
+
+
+@app.get("/api/cameras/snapshot")
+async def get_cameras_snapshot(index: int, refresh: bool = False, _: str = Depends(auth.require_auth)):
+    try:
+        return camera_snapshot_response(index, refresh)
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+
+def camera_snapshot_response(index: int, refresh: bool = False) -> Response:
+    c = config.read_config()
+    path = monitor.camera_snapshot_path(index)
+    if refresh or not path.exists():
+        path = monitor.capture_camera_snapshot(c, index)
+    return Response(
+        content=path.read_bytes(),
+        media_type="image/jpeg",
+        headers={"Cache-Control": "private, max-age=120"},
+    )
+
 
 @app.get("/api/camera/video")
 async def get_camera_video(index: int, _: str = Depends(auth.require_auth)):

@@ -1,0 +1,577 @@
+<!doctype html>
+<html lang="vi">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Cameras - Fall Detection</title>
+  <link rel="icon" type="image/svg+xml" href="/favicon.ico">
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Fira+Code:wght@500;600;700&family=Fira+Sans:wght@400;500;600;700&display=swap');
+    :root {
+      --bg: #020617;
+      --surface: #0f172a;
+      --surface-2: #111c2f;
+      --line: #26364d;
+      --line-strong: #3d506c;
+      --text: #f8fafc;
+      --muted: #9aa8bd;
+      --good: #22c55e;
+      --info: #38bdf8;
+      --bad: #f43f5e;
+      --radius: 8px;
+      --shadow: 0 24px 80px rgba(0, 0, 0, .34);
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      min-height: 100vh;
+      background:
+        radial-gradient(circle at 18% -12%, rgba(56, 189, 248, .14), transparent 31rem),
+        radial-gradient(circle at 88% 4%, rgba(34, 197, 94, .11), transparent 28rem),
+        linear-gradient(180deg, #020617 0%, #07111f 100%);
+      color: var(--text);
+      font: 14px/1.45 "Fira Sans", Arial, sans-serif;
+    }
+    h1, h2, h3, p { margin: 0; }
+    h1, h2, h3, .mono { font-family: "Fira Code", ui-monospace, Consolas, monospace; }
+    button, input, select { font: inherit; }
+    button, a, select, input[type="checkbox"] { cursor: pointer; }
+    a { color: var(--info); text-decoration: none; }
+    .layout { display: grid; grid-template-columns: 232px minmax(0, 1fr); min-height: 100vh; }
+    aside {
+      border-right: 1px solid var(--line);
+      background: rgba(2, 6, 23, .78);
+      padding: 18px;
+      display: flex;
+      flex-direction: column;
+      gap: 18px;
+    }
+    .brand { display: flex; gap: 12px; align-items: center; min-height: 48px; }
+    .mark {
+      width: 42px; height: 42px; border-radius: var(--radius);
+      display: grid; place-items: center; color: var(--good);
+      border: 1px solid rgba(34, 197, 94, .36);
+      background: linear-gradient(180deg, rgba(34, 197, 94, .16), rgba(56, 189, 248, .08));
+    }
+    .brand h1 { font-size: 16px; }
+    .brand p { color: var(--muted); font-size: 12px; }
+    nav { display: grid; gap: 6px; }
+    .nav-link {
+      min-height: 40px;
+      border-radius: var(--radius);
+      color: var(--muted);
+      padding: 10px;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+    .nav-link:hover, .nav-link.active {
+      color: var(--text);
+      background: rgba(34, 197, 94, .12);
+      outline: 1px solid rgba(34, 197, 94, .36);
+    }
+    main { min-width: 0; padding: 0 22px 28px; }
+    .topbar {
+      min-height: 74px;
+      margin: 0 -22px 18px;
+      padding: 14px 22px;
+      border-bottom: 1px solid var(--line);
+      background: rgba(7, 17, 31, .84);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 14px;
+      position: sticky;
+      top: 0;
+      z-index: 10;
+      backdrop-filter: blur(18px);
+    }
+    .topbar h2 { font-size: 20px; }
+    .topbar p { color: var(--muted); margin-top: 3px; }
+    .actions { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+    .btn {
+      min-height: 38px;
+      border: 1px solid var(--line-strong);
+      border-radius: var(--radius);
+      background: rgba(30, 41, 59, .62);
+      color: var(--text);
+      padding: 8px 12px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      font-weight: 700;
+      white-space: nowrap;
+    }
+    .btn:hover { border-color: var(--info); background: rgba(56, 189, 248, .10); }
+    .btn.primary { border-color: rgba(34, 197, 94, .68); background: var(--good); color: #04130a; }
+    .btn.danger { border-color: rgba(244, 63, 94, .72); color: #fecdd3; background: rgba(244, 63, 94, .12); }
+    .btn.small { min-height: 34px; padding: 7px 9px; font-size: 12px; }
+    .panel {
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      background: linear-gradient(180deg, rgba(15, 23, 42, .94), rgba(12, 21, 36, .94));
+      padding: 16px;
+    }
+    .panel-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 14px; margin-bottom: 16px; }
+    .panel-head h3 { font-size: 15px; }
+    .panel-head p { color: var(--muted); margin-top: 3px; }
+    .grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; }
+    .camera-card {
+      position: relative;
+      display: grid;
+      grid-template-columns: 220px minmax(0, max-content);
+      gap: 14px;
+      width: fit-content;
+      max-width: 100%;
+      padding: 13px 54px 13px 13px;
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      background: rgba(2, 6, 23, .24);
+    }
+    .thumb {
+      position: relative;
+      width: 100%;
+      aspect-ratio: 16 / 9;
+      overflow: hidden;
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      background: #000;
+    }
+    .thumb img { width: 100%; height: 100%; display: block; object-fit: cover; }
+    .thumb .empty { width: 100%; height: 100%; display: grid; place-items: center; color: var(--muted); }
+    .thumb-refresh {
+      position: absolute;
+      top: 8px; right: 8px;
+      width: 32px; height: 32px;
+      border: 1px solid rgba(148, 163, 184, .42);
+      border-radius: 8px;
+      background: rgba(2, 6, 23, .72);
+      color: var(--text);
+      display: grid;
+      place-items: center;
+      z-index: 2;
+    }
+    .thumb-refresh:hover { border-color: rgba(56, 189, 248, .76); background: rgba(15, 23, 42, .92); }
+    .thumb-refresh svg, .btn svg, .mark svg { width: 17px; height: 17px; stroke: currentColor; stroke-width: 1.9; fill: none; stroke-linecap: round; stroke-linejoin: round; }
+    .camera-main { min-height: 124px; display: flex; flex-direction: column; justify-content: space-between; gap: 10px; min-width: 0; }
+    .camera-main h3 { font-size: 14px; }
+    .source { color: var(--muted); margin-top: 4px; word-break: break-all; }
+    .meta { display: grid; grid-template-columns: repeat(2, minmax(112px, 178px)); gap: 8px; }
+    .badge {
+      display: inline-flex;
+      align-items: center;
+      min-height: 28px;
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      padding: 4px 9px;
+      color: var(--muted);
+      background: rgba(2, 6, 23, .28);
+      font-size: 12px;
+      font-weight: 700;
+      white-space: nowrap;
+    }
+    .meta .badge { width: 100%; justify-content: space-between; border-radius: 8px; }
+    .badge.good { color: #bbf7d0; border-color: rgba(34, 197, 94, .44); background: rgba(34, 197, 94, .10); }
+    .badge.bad { color: #fecdd3; border-color: rgba(244, 63, 94, .44); background: rgba(244, 63, 94, .10); }
+    .status { position: absolute; top: 13px; right: 54px; }
+    .empty-panel {
+      min-height: 180px;
+      border: 1px dashed var(--line-strong);
+      border-radius: var(--radius);
+      display: grid;
+      place-items: center;
+      color: var(--muted);
+      background: rgba(2, 6, 23, .22);
+    }
+    dialog {
+      width: min(880px, calc(100vw - 28px));
+      border: 1px solid var(--line-strong);
+      border-radius: var(--radius);
+      padding: 0;
+      color: var(--text);
+      background: var(--surface);
+      box-shadow: var(--shadow);
+    }
+    dialog::backdrop { background: rgba(0, 0, 0, .72); backdrop-filter: blur(4px); }
+    .dialog-head, .dialog-foot {
+      padding: 14px 16px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      border-bottom: 1px solid var(--line);
+    }
+    .dialog-foot { border-top: 1px solid var(--line); border-bottom: 0; justify-content: flex-end; }
+    .dialog-body { padding: 16px; max-height: calc(100vh - 160px); overflow: auto; }
+    .form-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+    .field.full { grid-column: 1 / -1; }
+    label { color: var(--muted); font-size: 12px; font-weight: 700; display: block; margin-bottom: 6px; }
+    input, select {
+      width: 100%;
+      min-height: 40px;
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      background: rgba(2, 6, 23, .42);
+      color: var(--text);
+      padding: 9px 11px;
+      outline: none;
+    }
+    input[type="checkbox"] { width: 18px; min-height: 18px; accent-color: var(--good); }
+    .check-row {
+      min-height: 40px;
+      display: flex;
+      align-items: center;
+      gap: 9px;
+      padding: 9px 11px;
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      background: rgba(2, 6, 23, .28);
+      color: var(--muted);
+      font-weight: 700;
+      font-size: 12px;
+    }
+    .stack { display: grid; gap: 10px; }
+    .help-text { color: var(--muted); display: block; font-size: 12px; margin-top: 5px; }
+    .toast {
+      position: fixed;
+      right: 18px;
+      bottom: 18px;
+      z-index: 100;
+      max-width: 380px;
+      border: 1px solid var(--line);
+      border-left: 4px solid var(--info);
+      border-radius: var(--radius);
+      background: rgba(15, 23, 42, .96);
+      padding: 12px 14px;
+      color: var(--text);
+      font-weight: 700;
+      box-shadow: var(--shadow);
+    }
+    .toast.good { border-left-color: var(--good); }
+    .toast.bad { border-left-color: var(--bad); }
+    .hidden { display: none !important; }
+    @media (max-width: 1100px) {
+      .layout { grid-template-columns: 1fr; }
+      aside { display: none; }
+      .grid { grid-template-columns: 1fr; }
+    }
+    @media (max-width: 720px) {
+      main { padding: 0 14px 20px; }
+      .topbar { margin: 0 -14px 14px; align-items: stretch; flex-direction: column; }
+      .camera-card { grid-template-columns: 1fr; width: 100%; padding-right: 13px; }
+      .status { position: static; width: fit-content; }
+      .meta, .form-grid { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body>
+  <div class="layout">
+    <aside>
+      <div class="brand">
+        <div class="mark" data-icon="shield"></div>
+        <div>
+          <h1>Fall Detection</h1>
+          <p>Camera operations</p>
+        </div>
+      </div>
+      <nav>
+        <a class="nav-link" href="/">Dashboard</a>
+        <a class="nav-link active" href="/cameras">Cameras</a>
+        <a class="nav-link" href="/prompts">Prompts</a>
+        <a class="nav-link" href="/live">Live View</a>
+        <a class="nav-link" href="/settings">Settings</a>
+        <a class="nav-link" href="/tools">Tools</a>
+      </nav>
+    </aside>
+
+    <main>
+      <header class="topbar">
+        <div>
+          <h2>Cameras</h2>
+          <p>Standalone camera source, prompt, and evidence policy page.</p>
+        </div>
+        <div class="actions">
+          <button id="refreshBtn" class="btn" type="button"><span data-icon="refresh"></span>Refresh</button>
+          <button id="addBtn" class="btn primary" type="button"><span data-icon="plus"></span>Add camera</button>
+        </div>
+      </header>
+
+      <section class="panel">
+        <div class="panel-head">
+          <div>
+            <h3>Cameras</h3>
+            <p>Thumbnails are cached. Use the corner refresh button to capture a fresh frame.</p>
+          </div>
+          <span id="cameraCount" class="badge">0 cameras</span>
+        </div>
+        <div id="cameraGrid" class="grid"></div>
+      </section>
+    </main>
+  </div>
+
+  <dialog id="cameraDialog">
+    <div class="dialog-head">
+      <div>
+        <h3 id="dialogTitle">Add camera</h3>
+        <p class="help-text">Camera source and evidence options.</p>
+      </div>
+      <button class="btn small" data-close-dialog="cameraDialog" type="button">Close</button>
+    </div>
+    <div class="dialog-body">
+      <div class="form-grid">
+        <label class="check-row full"><input id="camEnabled" type="checkbox">Enabled</label>
+        <div class="field"><label for="camName">Name</label><input id="camName" autocomplete="off"></div>
+        <div class="field"><label for="camPrompt">Prompt</label><select id="camPrompt"><option value="">Default prompt</option></select></div>
+        <div class="field full"><label for="camRtsp">RTSP URL</label><input id="camRtsp" autocomplete="off"></div>
+        <div class="field"><label for="camGo2rtc">go2rtc src</label><input id="camGo2rtc" autocomplete="off"></div>
+        <div class="field"><label for="camLive">Live URL</label><input id="camLive" autocomplete="off"></div>
+        <div class="field full">
+          <label for="camLiveMode">Chế độ live</label>
+          <select id="camLiveMode">
+            <option value="auto">Tự động: go2rtc iframe</option>
+            <option value="iframe">go2rtc iframe / MSE</option>
+            <option value="snapshot">Snapshot refresh cho HEVC</option>
+          </select>
+          <span class="help-text">HEVC/H.265 thường không hiển thị trong MSE trên browser. Chọn Snapshot refresh nếu live bị đen.</span>
+        </div>
+        <div class="field">
+          <label>Lưu trữ local</label>
+          <div class="stack">
+            <label class="check-row"><input id="camSaveImages" type="checkbox">Lưu ảnh sự kiện trên VPS</label>
+            <label class="check-row"><input id="camSaveVideos" type="checkbox">Lưu video ghi hình trên VPS</label>
+          </div>
+        </div>
+        <div class="field">
+          <label>Upload / ghi hình</label>
+          <div class="stack">
+            <label class="check-row"><input id="camUploadImages" type="checkbox">Upload ảnh sự kiện</label>
+            <label class="check-row"><input id="camRecordVideo" type="checkbox">Ghi và upload video</label>
+          </div>
+        </div>
+        <div class="field"><label for="camRecordSeconds">Thời lượng quay video (giây)</label><input id="camRecordSeconds" type="number" min="1"></div>
+        <div class="field"><label for="camRecordCooldown">Thời gian chờ trước lần quay tiếp theo (giây)</label><input id="camRecordCooldown" type="number" min="1"></div>
+      </div>
+    </div>
+    <div class="dialog-foot">
+      <button class="btn" data-close-dialog="cameraDialog" type="button">Cancel</button>
+      <button id="saveBtn" class="btn primary" type="button">Save camera</button>
+    </div>
+  </dialog>
+
+  <div id="toast" class="toast hidden"></div>
+
+  <script>
+    const icons = {
+      shield: '<svg viewBox="0 0 24 24"><path d="M12 3l7 3v5c0 5-3 8-7 10-4-2-7-5-7-10V6l7-3z"/><path d="M9 12l2 2 4-5"/></svg>',
+      plus: '<svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>',
+      refresh: '<svg viewBox="0 0 24 24"><path d="M21 12a9 9 0 0 1-15.4 6.4L3 16"/><path d="M3 21v-5h5"/><path d="M3 12A9 9 0 0 1 18.4 5.6L21 8"/><path d="M21 3v5h-5"/></svg>'
+    };
+    document.querySelectorAll("[data-icon]").forEach(el => { el.innerHTML = icons[el.dataset.icon] || ""; });
+
+    const state = { cameras: [], prompts: [], go2rtcUrl: "", editing: -1, snapshotUrls: {} };
+
+    function $(id) { return document.getElementById(id); }
+    function esc(value) {
+      return String(value ?? "").replace(/[&<>"']/g, ch => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[ch]));
+    }
+    function showToast(message, type = "info") {
+      const toast = $("toast");
+      toast.textContent = message;
+      toast.className = `toast ${type === "ok" ? "good" : type === "err" ? "bad" : ""}`;
+      toast.classList.remove("hidden");
+      setTimeout(() => toast.classList.add("hidden"), 4200);
+    }
+    async function api(url, options = {}) {
+      const res = await fetch(url, options);
+      const text = await res.text();
+      let data = {};
+      try { data = text ? JSON.parse(text) : {}; } catch { data = { raw: text }; }
+      if (!res.ok) throw new Error(data.detail || data.message || `HTTP ${res.status}`);
+      return data;
+    }
+    function cameraName(camera, index) { return camera.name || camera.go2rtc_src || camera.rtsp_url || `Camera ${index + 1}`; }
+    function promptTitle(id) {
+      const prompt = state.prompts.find(item => item.id === id);
+      return prompt ? prompt.title || "Untitled prompt" : "Default prompt";
+    }
+    function snapshotSignature(camera, index) {
+      return [index, cameraName(camera, index), camera.rtsp_url || "", camera.go2rtc_src || "", camera.live_url || "", camera.live_mode || "auto"].join("|");
+    }
+    function snapshotUrl(index, refresh = false) {
+      const camera = state.cameras[index] || {};
+      const signature = snapshotSignature(camera, index);
+      const cached = state.snapshotUrls[index];
+      if (refresh || !cached || cached.signature !== signature) {
+        state.snapshotUrls[index] = {
+          signature,
+          url: `/api/cameras/snapshot?index=${index}${refresh ? "&refresh=1" : ""}&v=${Date.now()}`
+        };
+      }
+      return state.snapshotUrls[index].url;
+    }
+    function setBusy(button, busy) {
+      if (!button) return;
+      button.disabled = busy;
+    }
+    function fillPrompts() {
+      const select = $("camPrompt");
+      const current = select.value;
+      select.innerHTML = '<option value="">Default prompt</option>';
+      state.prompts.forEach(prompt => {
+        const option = document.createElement("option");
+        option.value = prompt.id;
+        option.textContent = prompt.title || "Untitled prompt";
+        select.appendChild(option);
+      });
+      select.value = current;
+    }
+    function render() {
+      fillPrompts();
+      $("cameraCount").textContent = `${state.cameras.length} camera${state.cameras.length === 1 ? "" : "s"}`;
+      const grid = $("cameraGrid");
+      if (!state.cameras.length) {
+        grid.innerHTML = '<div class="empty-panel">No cameras configured.</div>';
+        return;
+      }
+      grid.innerHTML = state.cameras.map((camera, index) => {
+        const name = cameraName(camera, index);
+        const hasSnapshot = camera.rtsp_url || camera.go2rtc_src || camera.name;
+        return `
+          <article class="camera-card">
+            <div class="thumb">
+              ${hasSnapshot
+                ? `<img src="${esc(snapshotUrl(index))}" loading="lazy" alt="${esc(name)} snapshot" onerror="this.replaceWith(Object.assign(document.createElement('div'), {className: 'empty', textContent: 'Snapshot unavailable'}))"><button class="thumb-refresh" data-refresh-thumb="${index}" type="button" title="Refresh thumbnail" aria-label="Refresh ${esc(name)} thumbnail">${icons.refresh}</button>`
+                : '<div class="empty">No snapshot source</div>'}
+            </div>
+            <div class="camera-main">
+              <div>
+                <h3>${esc(name)}</h3>
+                <p class="source">${esc(camera.rtsp_url || camera.go2rtc_src || camera.live_url || "No source configured")}</p>
+              </div>
+              <div class="meta">
+                <span class="badge">Prompt: ${esc(promptTitle(camera.prompt_id))}</span>
+                <span class="badge ${camera.teldrive_record_enabled ? "good" : ""}">Record: ${camera.teldrive_record_enabled ? "On" : "Off"}</span>
+              </div>
+              <div class="actions">
+                <a class="btn small" href="/camera/${encodeURIComponent(name)}">Open detail</a>
+                <button class="btn small" data-toggle="${index}" type="button">${camera.enabled ? "Disable" : "Enable"}</button>
+                <button class="btn small" data-edit="${index}" type="button">Edit</button>
+                <button class="btn small danger" data-delete="${index}" type="button">Delete</button>
+              </div>
+            </div>
+            <span class="badge status ${camera.enabled ? "good" : "bad"}">${camera.enabled ? "Enabled" : "Disabled"}</span>
+          </article>`;
+      }).join("");
+    }
+    async function loadCameras() {
+      const data = await api("/api/cameras");
+      state.cameras = Array.isArray(data.cameras) ? data.cameras : [];
+      state.prompts = Array.isArray(data.prompts) ? data.prompts : [];
+      state.go2rtcUrl = data.go2rtc_url || "";
+      render();
+    }
+    async function saveCameras() {
+      const data = await api("/api/cameras", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ cameras: state.cameras })
+      });
+      state.cameras = Array.isArray(data.cameras) ? data.cameras : [];
+      state.prompts = Array.isArray(data.prompts) ? data.prompts : [];
+      state.go2rtcUrl = data.go2rtc_url || "";
+      render();
+      showToast(data.message || "Cameras saved", "ok");
+    }
+    function openDialog(index = -1) {
+      state.editing = index;
+      const camera = index >= 0 ? state.cameras[index] : {
+        enabled: true, name: "", rtsp_url: "", go2rtc_src: "", live_url: "", live_mode: "auto", prompt_id: "",
+        local_save_images: true, local_save_videos: true, teldrive_upload_images: true, teldrive_record_enabled: false,
+        record_seconds: 10, record_cooldown: 300
+      };
+      $("dialogTitle").textContent = index >= 0 ? "Edit camera" : "Add camera";
+      $("camEnabled").checked = camera.enabled !== false;
+      $("camName").value = camera.name || "";
+      $("camPrompt").value = camera.prompt_id || "";
+      $("camRtsp").value = camera.rtsp_url || "";
+      $("camGo2rtc").value = camera.go2rtc_src || "";
+      $("camLive").value = camera.live_url || "";
+      $("camLiveMode").value = camera.live_mode || "auto";
+      $("camSaveImages").checked = camera.local_save_images !== false;
+      $("camSaveVideos").checked = camera.local_save_videos !== false;
+      $("camUploadImages").checked = camera.teldrive_upload_images !== false;
+      $("camRecordVideo").checked = camera.teldrive_record_enabled === true;
+      $("camRecordSeconds").value = camera.record_seconds || 10;
+      $("camRecordCooldown").value = camera.record_cooldown || 300;
+      $("cameraDialog").showModal();
+    }
+    function readDialogCamera() {
+      return {
+        enabled: $("camEnabled").checked,
+        name: $("camName").value.trim(),
+        rtsp_url: $("camRtsp").value.trim(),
+        go2rtc_src: $("camGo2rtc").value.trim(),
+        live_url: $("camLive").value.trim(),
+        live_mode: $("camLiveMode").value,
+        prompt_id: $("camPrompt").value,
+        local_save_images: $("camSaveImages").checked,
+        local_save_videos: $("camSaveVideos").checked,
+        teldrive_upload_images: $("camUploadImages").checked,
+        teldrive_record_enabled: $("camRecordVideo").checked,
+        record_seconds: Math.max(1, Number($("camRecordSeconds").value || 10)),
+        record_cooldown: Math.max(1, Number($("camRecordCooldown").value || 300))
+      };
+    }
+
+    document.addEventListener("click", async event => {
+      const refresh = event.target.closest("[data-refresh-thumb]");
+      if (refresh) {
+        const index = Number(refresh.dataset.refreshThumb);
+        const thumb = refresh.closest(".thumb");
+        const img = thumb ? thumb.querySelector("img") : null;
+        if (!img) return;
+        setBusy(refresh, true);
+        img.src = snapshotUrl(index, true);
+        img.onload = () => setBusy(refresh, false);
+        img.onerror = () => {
+          setBusy(refresh, false);
+          showToast("Snapshot refresh failed.", "err");
+        };
+        return;
+      }
+      const edit = event.target.closest("[data-edit]");
+      if (edit) openDialog(Number(edit.dataset.edit));
+      const toggle = event.target.closest("[data-toggle]");
+      if (toggle) {
+        const index = Number(toggle.dataset.toggle);
+        state.cameras[index].enabled = !state.cameras[index].enabled;
+        await saveCameras();
+      }
+      const del = event.target.closest("[data-delete]");
+      if (del && confirm("Delete this camera?")) {
+        state.cameras.splice(Number(del.dataset.delete), 1);
+        await saveCameras();
+      }
+      const close = event.target.closest("[data-close-dialog]");
+      if (close) $(close.dataset.closeDialog).close();
+    });
+
+    $("addBtn").addEventListener("click", () => openDialog(-1));
+    $("refreshBtn").addEventListener("click", () => loadCameras().then(() => showToast("Cameras reloaded", "ok")).catch(err => showToast(err.message, "err")));
+    $("saveBtn").addEventListener("click", async () => {
+      const camera = readDialogCamera();
+      if (!camera.name && !camera.rtsp_url && !camera.go2rtc_src && !camera.live_url) {
+        showToast("Camera needs a name or source.", "err");
+        return;
+      }
+      if (state.editing >= 0) state.cameras[state.editing] = camera;
+      else state.cameras.push(camera);
+      $("cameraDialog").close();
+      await saveCameras();
+    });
+
+    loadCameras().catch(err => showToast(err.message || "Could not load cameras", "err"));
+  </script>
+</body>
+</html>
