@@ -8,7 +8,7 @@ import threading
 import time
 from pathlib import Path
 from typing import Any
-from urllib.parse import parse_qs, urlparse, urlunparse
+from urllib.parse import parse_qs, parse_qsl, urlencode, urlparse, urlunparse
 
 import requests
 
@@ -179,17 +179,36 @@ def video_only_source(src: str) -> str:
     return urlunparse(parsed._replace(fragment="#".join(flags)))
 
 
+def with_video_only_query(url: str) -> str:
+    parsed = urlparse(str(url or "").strip())
+    query = parse_qsl(parsed.query, keep_blank_values=True)
+    keys = {key.lower() for key, _value in query}
+    for key, value in (("video", ""), ("media", "video"), ("backchannel", "0")):
+        if key not in keys:
+            query.append((key, value))
+    return urlunparse(parsed._replace(query=urlencode(query)))
+
+
+def go2rtc_video_only_params(params: dict[str, str]) -> dict[str, str]:
+    filtered = dict(params)
+    keys = {key.lower() for key in filtered}
+    for key, value in (("video", ""), ("media", "video"), ("backchannel", "0")):
+        if key not in keys:
+            filtered[key] = value
+    return filtered
+
+
 def go2rtc_frame_request(config: dict[str, Any], camera: dict[str, Any]) -> tuple[str, dict[str, str], str]:
     raw_source = str(camera.get("go2rtc_src") or "").strip()
     if is_http_url(raw_source):
-        return raw_source, {}, go2rtc_source(camera)
+        return with_video_only_query(raw_source), {}, go2rtc_source(camera)
 
     base_url = str(config.get("go2rtc_url", "")).strip().rstrip("/")
     src = go2rtc_source(camera)
     if not base_url or not src:
         raise ValueError("go2rtc URL or camera source is empty")
     request_src = video_only_source(src)
-    return f"{base_url}/api/frame.jpeg", {"src": request_src}, src
+    return f"{base_url}/api/frame.jpeg", go2rtc_video_only_params({"src": request_src}), src
 
 
 def fetch_go2rtc_frame_bytes(config: dict[str, Any], camera: dict[str, Any], timeout: int, attempts: int = 3) -> tuple[bytes, str]:
