@@ -338,6 +338,13 @@ def get_recordings(
     for item in recordings:
         name = quote(str(item["teldrive_video_name"]), safe="")
         item["video_url"] = f"/api/teldrive/file/{item['teldrive_video_id']}/{name}"
+        
+        image_file = str(item.get("image_file") or "").strip()
+        if item.get("teldrive_image_id") and item.get("teldrive_image_name"):
+            img_name = quote(str(item["teldrive_image_name"]), safe="")
+            item["image_url"] = f"/api/teldrive/file/{item['teldrive_image_id']}/{img_name}"
+        elif image_file and (EVENT_IMAGES_DIR / image_file).exists():
+            item["image_url"] = f"/api/event-image/{image_file}"
     return recordings
 
 
