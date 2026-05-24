@@ -545,22 +545,6 @@
 
         <section class="panel">
           <div class="panel-head">
-            <div><h3>Camera Events</h3><p class="muted">Timeline filtered to this camera.</p></div>
-            <div class="toolbar">
-              <select id="eventFilterAI"><option value="">All AI results</option><option>SAFE</option><option>EMERGENCY</option></select>
-              <select id="eventPageSize"><option>10</option><option>25</option><option>50</option></select>
-              <button id="refreshEventsBtn" class="btn" type="button"><span data-icon="refresh"></span>Refresh</button>
-              <button id="clearEventsBtn" class="btn danger" type="button"><span data-icon="trash"></span>Clear</button>
-            </div>
-          </div>
-          <div style="overflow:auto;">
-            <table><thead><tr><th>Evidence</th><th>Time</th><th>Camera</th><th>Status</th><th>AI</th><th>Description</th></tr></thead><tbody id="eventsBody"></tbody></table>
-          </div>
-          <div class="pager"><span id="eventsPageInfo" class="muted">Page 1</span><div class="actions"><button id="prevPageBtn" class="btn small"><span data-icon="chevron-left"></span>Previous</button><button id="nextPageBtn" class="btn small">Next<span data-icon="chevron-right"></span></button></div></div>
-        </section>
-
-        <section class="panel">
-          <div class="panel-head">
             <div><h3>Camera Recordings</h3><p class="muted">Video evidence filtered to this camera.</p></div>
             <div class="toolbar">
               <input id="recordingDateFrom" type="date" title="From date">
@@ -580,6 +564,22 @@
           </div>
           <div class="panel-body"><div id="recordingsGrid" class="recordings-grid"></div></div>
           <div class="pager"><span id="recordingsPageInfo" class="muted">Page 1</span><div class="actions"><button id="prevRecordingPageBtn" class="btn small"><span data-icon="chevron-left"></span>Previous</button><button id="nextRecordingPageBtn" class="btn small">Next<span data-icon="chevron-right"></span></button></div></div>
+        </section>
+
+        <section class="panel">
+          <div class="panel-head">
+            <div><h3>Camera Events</h3><p class="muted">Timeline filtered to this camera.</p></div>
+            <div class="toolbar">
+              <select id="eventFilterAI"><option value="">All AI results</option><option>SAFE</option><option>EMERGENCY</option></select>
+              <select id="eventPageSize"><option>10</option><option>25</option><option>50</option></select>
+              <button id="refreshEventsBtn" class="btn" type="button"><span data-icon="refresh"></span>Refresh</button>
+              <button id="clearEventsBtn" class="btn danger" type="button"><span data-icon="trash"></span>Clear</button>
+            </div>
+          </div>
+          <div style="overflow:auto;">
+            <table><thead><tr><th>Evidence</th><th>Time</th><th>Camera</th><th>Status</th><th>AI</th><th>Description</th></tr></thead><tbody id="eventsBody"></tbody></table>
+          </div>
+          <div class="pager"><span id="eventsPageInfo" class="muted">Page 1</span><div class="actions"><button id="prevPageBtn" class="btn small"><span data-icon="chevron-left"></span>Previous</button><button id="nextPageBtn" class="btn small">Next<span data-icon="chevron-right"></span></button></div></div>
         </section>
       </section>
     </main>
@@ -903,8 +903,58 @@
       try { const data = await api(`/api/test-ai-camera?index=${state.index}`, { method:"POST", timeout:150000 }); showToast(`AI: ${data.result || "done"}`, "ok"); await loadEvents(); }
       catch (err) { showToast(err.message, "err"); }
     };
+    function savePreferences() {
+      try {
+        localStorage.setItem("pref_recording_layout", $("recordingLayoutSelect").value);
+        localStorage.setItem("pref_recording_grid_cols", $("recordingGridCols").value);
+        localStorage.setItem("pref_recording_page_size", $("recordingPageSize").value);
+        localStorage.setItem("pref_recording_show_thumb", $("recordingShowThumb").checked ? "1" : "0");
+        localStorage.setItem("pref_recording_mask_cover", $("recordingMaskCover").checked ? "1" : "0");
+        
+        localStorage.setItem("pref_event_filter_ai", $("eventFilterAI").value);
+        localStorage.setItem("pref_event_page_size", $("eventPageSize").value);
+      } catch (e) {
+        console.error("Failed to save preferences to localStorage", e);
+      }
+    }
+
+    function loadPreferences() {
+      try {
+        const layout = localStorage.getItem("pref_recording_layout");
+        if (layout) $("recordingLayoutSelect").value = layout;
+
+        const cols = localStorage.getItem("pref_recording_grid_cols");
+        if (cols) $("recordingGridCols").value = cols;
+
+        const size = localStorage.getItem("pref_recording_page_size");
+        if (size) $("recordingPageSize").value = size;
+
+        const showThumb = localStorage.getItem("pref_recording_show_thumb");
+        if (showThumb !== null) $("recordingShowThumb").checked = showThumb === "1";
+
+        const maskCover = localStorage.getItem("pref_recording_mask_cover");
+        if (maskCover !== null) $("recordingMaskCover").checked = maskCover === "1";
+
+        const eventFilter = localStorage.getItem("pref_event_filter_ai");
+        if (eventFilter) $("eventFilterAI").value = eventFilter;
+
+        const eventPageSize = localStorage.getItem("pref_event_page_size");
+        if (eventPageSize) $("eventPageSize").value = eventPageSize;
+
+        // Hide columns selector if list view
+        const isGrid = $("recordingLayoutSelect").value === "grid";
+        $("recordingGridCols").classList.toggle("hidden", !isGrid);
+      } catch (e) {
+        console.error("Failed to load preferences from localStorage", e);
+      }
+    }
+
     $("refreshEventsBtn").onclick = () => { state.eventsPage = 1; loadEvents().catch(err => showToast(err.message, "err")); };
-    $("eventFilterAI").onchange = $("eventPageSize").onchange = () => { state.eventsPage = 1; loadEvents(); };
+    $("eventFilterAI").onchange = $("eventPageSize").onchange = () => {
+      savePreferences();
+      state.eventsPage = 1;
+      loadEvents();
+    };
     $("prevPageBtn").onclick = () => { if (state.eventsPage > 1) { state.eventsPage--; loadEvents(); } };
     $("nextPageBtn").onclick = () => { state.eventsPage++; loadEvents(); };
     $("clearEventsBtn").onclick = async () => {
@@ -914,10 +964,16 @@
       showToast(data.message || "Events cleared", "ok"); state.eventsPage = 1; await loadEvents();
     };
     $("refreshRecordingsBtn").onclick = () => { state.recordingsPage = 1; loadRecordings().catch(err => showToast(err.message, "err")); };
-    $("recordingDateFrom").onchange = $("recordingDateTo").onchange = $("recordingPageSize").onchange = $("recordingGridCols").onchange = $("recordingMaskCover").onchange = $("recordingShowThumb").onchange = () => { state.recordingsPage = 1; loadRecordings(); };
+    $("recordingDateFrom").onchange = $("recordingDateTo").onchange = () => { state.recordingsPage = 1; loadRecordings(); };
+    $("recordingPageSize").onchange = $("recordingGridCols").onchange = $("recordingMaskCover").onchange = $("recordingShowThumb").onchange = () => {
+      savePreferences();
+      state.recordingsPage = 1;
+      loadRecordings();
+    };
     $("recordingLayoutSelect").onchange = () => {
       const isGrid = $("recordingLayoutSelect").value === "grid";
       $("recordingGridCols").classList.toggle("hidden", !isGrid);
+      savePreferences();
       state.recordingsPage = 1;
       loadRecordings();
     };
@@ -929,6 +985,7 @@
       const data = await api(`/api/recordings?camera=${encodeURIComponent(camera)}`, { method:"DELETE" });
       showToast(data.message || "Recordings cleared", "ok"); state.recordingsPage = 1; await loadRecordings();
     };
+    loadPreferences();
     loadCamera().then(() => Promise.all([loadStatus(), loadEvents(), loadRecordings()])).catch(err => showToast(err.message, "err"));
     setInterval(() => loadStatus().catch(() => {}), 10000);
   </script>
