@@ -384,6 +384,16 @@
     }
     .toast.good { border-left-color: var(--good); }
     .toast.bad { border-left-color: var(--bad); }
+    .loading-spinner {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      animation: spin 0.85s linear infinite;
+    }
+    @keyframes spin {
+      from { transform: rotate(0deg); }
+      to { transform: rotate(360deg); }
+    }
     .hidden { display: none !important; }
     @media (max-width: 1100px) {
       .layout { grid-template-columns: 1fr; }
@@ -642,6 +652,7 @@
     function updateCameraCard(index) {
       const card = document.querySelector(`.camera-card[data-index="${index}"]`);
       if (!card) return;
+      card.querySelectorAll(".actions .btn").forEach(btn => btn.disabled = false);
       const camera = state.cameras[index];
       const name = cameraName(camera, index);
       const renderSeq = state.renderSeq;
@@ -791,8 +802,27 @@
       const toggle = event.target.closest("[data-toggle]");
       if (toggle) {
         const index = Number(toggle.dataset.toggle);
+        const originalEnabled = state.cameras[index].enabled;
+        
+        // Optimistic update local state
         state.cameras[index].enabled = !state.cameras[index].enabled;
-        await saveCameras(index);
+        
+        // Disable action buttons during save
+        const card = toggle.closest(".camera-card");
+        const allButtons = card ? card.querySelectorAll(".actions .btn") : [toggle];
+        allButtons.forEach(btn => btn.disabled = true);
+        
+        const originalContent = toggle.innerHTML;
+        toggle.innerHTML = `<span class="loading-spinner">${icons.refresh}</span>${originalEnabled ? "Disabling..." : "Enabling..."}`;
+        
+        try {
+          await saveCameras(index);
+        } catch (err) {
+          state.cameras[index].enabled = originalEnabled;
+          allButtons.forEach(btn => btn.disabled = false);
+          toggle.innerHTML = originalContent;
+          showToast(err.message || "Failed to update camera status", "err");
+        }
       }
       const del = event.target.closest("[data-delete]");
       if (del && confirm("Delete this camera?")) {
