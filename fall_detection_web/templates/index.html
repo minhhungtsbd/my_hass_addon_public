@@ -607,6 +607,7 @@
       .brand h1 { font-size: 15px; }
     }
   </style>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 </head>
 <body>
   <div class="app">
@@ -682,17 +683,13 @@
           <section class="panel span-2">
             <div class="panel-head">
               <div>
-                <h3>Operations</h3>
-                <p>Primary actions for the current monitoring session.</p>
+                <h3>Incident Trends</h3>
+                <p>7-day overview of detected events and AI verifications.</p>
               </div>
             </div>
-            <div class="actions">
-              <button id="startBtn" class="btn primary" type="button"><span data-icon="play"></span>Start monitor</button>
-              <button id="stopBtn" class="btn danger" type="button"><span data-icon="stop"></span>Stop monitor</button>
-              <button id="captureBtn" class="btn" type="button"><span data-icon="camera"></span>Capture snapshot</button>
-              <button id="testAiQuickBtn" class="btn" type="button"><span data-icon="spark"></span>Test AI</button>
+            <div style="height: 180px; position: relative; margin-top: 4px;">
+              <canvas id="incidentChart"></canvas>
             </div>
-            <div id="actionStatus" class="muted" style="margin-top:12px;"></div>
           </section>
 
           <section class="panel">
@@ -966,7 +963,8 @@
       viewerUrl: "",
       viewerMode: "image",
       snapshotUrls: {},
-      liveRefreshTimers: []
+      liveRefreshTimers: [],
+      incidentChart: null
     };
 
     const pages = {
@@ -1341,6 +1339,135 @@
       }
     }
 
+    function getPast7Days() {
+      const dates = [];
+      const labels = [];
+      for (let i = 6; i >= 0; i--) {
+        const d = new Date();
+        d.setDate(d.getDate() - i);
+        const year = d.getFullYear();
+        const month = String(d.getMonth() + 1).padStart(2, '0');
+        const day = String(d.getDate()).padStart(2, '0');
+        dates.push(`${year}-${month}-${day}`);
+        labels.push(`${day}/${month}`);
+      }
+      return { dates, labels };
+    }
+
+    async function loadChartData() {
+      try {
+        const data = await api("/api/events?limit=300");
+        const events = data.events || [];
+        const past7 = getPast7Days();
+        const safeCounts = new Array(7).fill(0);
+        const emergencyCounts = new Array(7).fill(0);
+
+        events.forEach(event => {
+          const timeLocal = event.time_local || event.time;
+          if (!timeLocal) return;
+          const datePart = timeLocal.split('T')[0];
+          const idx = past7.dates.indexOf(datePart);
+          if (idx !== -1) {
+            const result = String(event.ai_result || event.status || "").toUpperCase();
+            if (result === "SAFE") {
+              safeCounts[idx]++;
+            } else if (result === "EMERGENCY") {
+              emergencyCounts[idx]++;
+            }
+          }
+        });
+
+        const canvas = $("incidentChart");
+        if (!canvas) return;
+
+        const ctx = canvas.getContext("2d");
+        if (state.incidentChart) {
+          state.incidentChart.data.labels = past7.labels;
+          state.incidentChart.data.datasets[0].data = safeCounts;
+          state.incidentChart.data.datasets[1].data = emergencyCounts;
+          state.incidentChart.update("none");
+          return;
+        }
+
+        const fontConfig = { family: '"Fira Sans", Arial, sans-serif', size: 10 };
+        state.incidentChart = new Chart(ctx, {
+          type: "line",
+          data: {
+            labels: past7.labels,
+            datasets: [
+              {
+                label: "Safe",
+                data: safeCounts,
+                borderColor: "#22c55e",
+                backgroundColor: "rgba(34, 197, 94, 0.08)",
+                borderWidth: 2,
+                tension: 0.35,
+                fill: true,
+                pointBackgroundColor: "#22c55e",
+                pointBorderColor: "rgba(255,255,255,0.05)",
+                pointHoverBackgroundColor: "#ffffff",
+                pointHoverBorderColor: "#22c55e",
+                pointRadius: 2.5,
+                pointHoverRadius: 4.5
+              },
+              {
+                label: "Emergency",
+                data: emergencyCounts,
+                borderColor: "#f43f5e",
+                backgroundColor: "rgba(244, 63, 94, 0.08)",
+                borderWidth: 2,
+                tension: 0.35,
+                fill: true,
+                pointBackgroundColor: "#f43f5e",
+                pointBorderColor: "rgba(255,255,255,0.05)",
+                pointHoverBackgroundColor: "#ffffff",
+                pointHoverBorderColor: "#f43f5e",
+                pointRadius: 2.5,
+                pointHoverRadius: 4.5
+              }
+            ]
+          },
+          options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: {
+              legend: {
+                display: true,
+                position: "top",
+                align: "end",
+                labels: { color: "#9aa8bd", font: fontConfig, boxWidth: 8, boxHeight: 8, padding: 8 }
+              },
+              tooltip: {
+                backgroundColor: "#0f172a",
+                titleColor: "#f8fafc",
+                bodyColor: "#dbe5f4",
+                borderColor: "#26364d",
+                borderWidth: 1,
+                titleFont: fontConfig,
+                bodyFont: fontConfig,
+                padding: 6,
+                cornerRadius: 4,
+                displayColors: true
+              }
+            },
+            scales: {
+              x: {
+                grid: { color: "rgba(38, 54, 77, 0.2)", borderColor: "rgba(38, 54, 77, 0.4)" },
+                ticks: { color: "#9aa8bd", font: fontConfig }
+              },
+              y: {
+                grid: { color: "rgba(38, 54, 77, 0.2)", borderColor: "rgba(38, 54, 77, 0.4)" },
+                ticks: { color: "#9aa8bd", font: fontConfig, stepSize: 1, precision: 0 },
+                min: 0
+              }
+            }
+          }
+        });
+      } catch (err) {
+        console.error("Failed to load chart data", err);
+      }
+    }
+
     async function loadRecentIncidents() {
       try {
         const data = await api("/api/events?page=1&limit=5");
@@ -1572,26 +1699,21 @@
       setBusy(button, true, "Working...");
       try {
         const data = await api(url, { method: "POST", timeout: 20000 });
-        setText("actionStatus", data.message || successPrefix);
         showToast(data.message || successPrefix, "ok");
         await loadStatus();
       } catch (err) {
-        setText("actionStatus", err.message);
         showToast(err.message, "err");
       } finally {
         setBusy(button, false);
       }
     }
-    $("startBtn").addEventListener("click", () => monitorAction("/api/start", $("startBtn"), "Monitor started"));
     $("quickStartBtn").addEventListener("click", () => monitorAction("/api/start", $("quickStartBtn"), "Monitor started"));
-    $("stopBtn").addEventListener("click", () => monitorAction("/api/stop", $("stopBtn"), "Monitor stopped"));
     $("quickStopBtn").addEventListener("click", () => monitorAction("/api/stop", $("quickStopBtn"), "Monitor stopped"));
-    $("captureBtn").addEventListener("click", () => monitorAction("/api/capture", $("captureBtn"), "Snapshot captured"));
     $("refreshBtn").addEventListener("click", async () => {
       await loadStatus();
+      await loadChartData();
       showToast("Dashboard refreshed", "ok");
     });
-    $("testAiQuickBtn").addEventListener("click", () => $("testAiBtn").click());
 
     $("liveLayoutSelect").addEventListener("change", event => { state.liveLayout = event.target.value; renderLive(); });
     $("refreshLiveBtn").addEventListener("click", renderLive);
@@ -1667,12 +1789,14 @@
         await loadConfig();
         await loadStatus();
         await loadRecentIncidents();
+        await loadChartData();
       } catch (err) {
         showToast(err.message || "Failed to load application data", "err");
       }
       setInterval(() => {
         loadStatus().catch(() => {});
         loadRecentIncidents().catch(() => {});
+        loadChartData().catch(() => {});
       }, 5000);
     })();
   </script>

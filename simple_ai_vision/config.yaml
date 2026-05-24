@@ -1,5 +1,5 @@
 name: Simple AI Vision
-version: "1.2.93"
+version: "1.2.94"
 slug: simple_ai_vision
 description: Lightweight AI camera snapshot analyzer using go2rtc and Telegram alerts
 url: "https://github.com/minhhungtsbd/my_hass_addon_public/tree/main/simple_ai_vision"
