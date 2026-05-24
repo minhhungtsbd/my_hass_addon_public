@@ -505,6 +505,7 @@ def capture_latest_frames(index: int, config: dict[str, Any], camera: dict[str, 
         cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
     last_reconnect_event = 0.0
     go2rtc_frame_interval = max(float(config.get("go2rtc_frame_interval", 1.0) or 1.0), float(config.get("loop_sleep", 0.2) or 0.2))
+    consecutive_failures = 0
 
     try:
         while not stop_event.is_set():
@@ -520,21 +521,27 @@ def capture_latest_frames(index: int, config: dict[str, Any], camera: dict[str, 
                 ok, frame = cap.read()
                 last_error = "RTSP read failed"
             if not ok:
+                consecutive_failures += 1
                 now = time.time()
                 if now - last_reconnect_event > 30:
                     source = "go2rtc" if use_go2rtc else "RTSP"
                     logger.warning("[%s] reconnect stream camera=%s error=%s", source.upper(), camera_name, last_error)
-                    set_state(last_error=f"{source} read failed for {camera_name}, reconnecting", last_camera=camera_name)
-                    insert_event("stream_reconnect", camera=camera_name, message=last_error)
+                    set_state(last_error=f"{source} read failed for {camera_name}, reconnecting (consecutive_failures={consecutive_failures})", last_camera=camera_name)
+                    insert_event("stream_reconnect", camera=camera_name, message=f"{last_error} (failures: {consecutive_failures})")
                     last_reconnect_event = now
                 if cap is not None:
                     cap.release()
-                time.sleep(0.5)
+                
+                # Exponential backoff: start at 2s, double each time up to a maximum of 30s
+                backoff_sleep = min(2.0 ** consecutive_failures, 30.0)
+                time.sleep(backoff_sleep)
+                
                 if not use_go2rtc:
                     cap = cv2.VideoCapture(rtsp_url)
                     cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
                 continue
 
+            consecutive_failures = 0
             with lock:
                 holder["frame"] = frame
                 holder["time"] = time.time()
