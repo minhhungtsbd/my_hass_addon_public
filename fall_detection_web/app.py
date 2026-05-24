@@ -11,7 +11,7 @@ from pathlib import Path
 from typing import Any
 
 import requests
-from fastapi import Body, Depends, FastAPI, Form, HTTPException, Request, Response, status
+from fastapi import Body, Depends, FastAPI, Form, HTTPException, Request, Response, status, UploadFile, File
 from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse, StreamingResponse
 from fastapi.templating import Jinja2Templates
 
@@ -90,11 +90,11 @@ async def favicon():
 # ──────────────────────────────────────────────
 
 @app.get("/login", response_class=HTMLResponse)
-async def login_page(request: Request):
+def login_page(request: Request):
     return templates.TemplateResponse(request=request, name="login.html", context={})
 
 @app.post("/auth/login")
-async def login(
+def login(
     request: Request,
     response: Response,
     username: str = Form(...),
@@ -123,37 +123,37 @@ async def login(
     return response
 
 @app.post("/auth/logout")
-async def logout():
+def logout():
     response = RedirectResponse(url="/login", status_code=status.HTTP_302_FOUND)
     response.delete_cookie("session")
     return response
 
 @app.get("/", response_class=HTMLResponse)
-async def index_page(request: Request, _: str = Depends(auth.require_auth)):
+def index_page(request: Request, _: str = Depends(auth.require_auth)):
     return templates.TemplateResponse(request=request, name="index.html", context={})
 
 
 @app.get("/cameras", response_class=HTMLResponse)
-async def cameras_page(request: Request, _: str = Depends(auth.require_auth)):
+def cameras_page(request: Request, _: str = Depends(auth.require_auth)):
     return templates.TemplateResponse(request=request, name="cameras.html", context={})
 
 
 @app.get("/camera/{camera_name:path}", response_class=HTMLResponse)
-async def camera_page(request: Request, camera_name: str, _: str = Depends(auth.require_auth)):
+def camera_page(request: Request, camera_name: str, _: str = Depends(auth.require_auth)):
     if not camera_name.strip():
         return RedirectResponse(url="/cameras", status_code=status.HTTP_302_FOUND)
     return templates.TemplateResponse(request=request, name="camera_detail.html", context={"camera_name": camera_name})
 
 
 @app.get("/{page_name}", response_class=HTMLResponse)
-async def app_page(request: Request, page_name: str, _: str = Depends(auth.require_auth)):
+def app_page(request: Request, page_name: str, _: str = Depends(auth.require_auth)):
     if page_name not in {"dashboard", "prompts", "live", "settings", "tools"}:
         raise HTTPException(status_code=404, detail="Page not found")
     return templates.TemplateResponse(request=request, name="index.html", context={})
 
 
 @app.get("/api/event-image/{filename}")
-async def event_image(request: Request, filename: str, _: str = Depends(auth.require_auth)):
+def event_image(request: Request, filename: str, _: str = Depends(auth.require_auth)):
     safe_name = Path(filename).name
     if safe_name != filename or not safe_name.lower().endswith(".jpg"):
         raise HTTPException(status_code=404, detail="Image not found")
@@ -186,7 +186,7 @@ async def event_image(request: Request, filename: str, _: str = Depends(auth.req
 
 
 @app.get("/api/teldrive/file/{file_id}/{file_name}")
-async def teldrive_file(request: Request, file_id: str, file_name: str, _: str = Depends(auth.require_auth)):
+def teldrive_file(request: Request, file_id: str, file_name: str, _: str = Depends(auth.require_auth)):
     try:
         c = config.read_config()
         response = teldrive.download_file(c, file_id, file_name, request.headers.get("range", ""))
@@ -231,7 +231,7 @@ async def teldrive_file(request: Request, file_id: str, file_name: str, _: str =
 # ──────────────────────────────────────────────
 
 @app.post("/api/user/update")
-async def update_user_credentials(
+def update_user_credentials(
     response: Response,
     payload: dict[str, str] = Body(...),
     username: str = Depends(auth.require_auth)
@@ -257,11 +257,11 @@ async def update_user_credentials(
         raise HTTPException(status_code=400, detail="Failed to update credentials. Username might already exist.")
 
 @app.get("/api/config")
-async def get_config(_: str = Depends(auth.require_auth)):
+def get_config(_: str = Depends(auth.require_auth)):
     return {"success": True, "config": config.read_config()}
 
 @app.post("/api/config")
-async def save_config(new_config: dict[str, Any] = Body(...), _: str = Depends(auth.require_auth)):
+def save_config(new_config: dict[str, Any] = Body(...), _: str = Depends(auth.require_auth)):
     try:
         updated = config.write_config(new_config)
         state = monitor.read_state()
@@ -279,7 +279,7 @@ async def save_config(new_config: dict[str, Any] = Body(...), _: str = Depends(a
 
 
 @app.get("/api/cameras")
-async def get_cameras(_: str = Depends(auth.require_auth)):
+def get_cameras(_: str = Depends(auth.require_auth)):
     c = config.read_config()
     return {
         "success": True,
@@ -305,7 +305,7 @@ def find_camera_by_name(c: dict[str, Any], camera_name: str) -> tuple[int, dict[
 
 
 @app.get("/api/camera/detail/{camera_name:path}")
-async def get_camera_detail(camera_name: str, _: str = Depends(auth.require_auth)):
+def get_camera_detail(camera_name: str, _: str = Depends(auth.require_auth)):
     c = config.read_config()
     index, camera = find_camera_by_name(c, camera_name)
     return {
@@ -319,7 +319,7 @@ async def get_camera_detail(camera_name: str, _: str = Depends(auth.require_auth
 
 
 @app.post("/api/cameras")
-async def save_cameras(payload: dict[str, Any] = Body(...), _: str = Depends(auth.require_auth)):
+def save_cameras(payload: dict[str, Any] = Body(...), _: str = Depends(auth.require_auth)):
     try:
         current = config.read_config()
         current["cameras"] = payload.get("cameras", [])
@@ -345,7 +345,7 @@ async def save_cameras(payload: dict[str, Any] = Body(...), _: str = Depends(aut
 
 
 @app.post("/api/teldrive/check")
-async def check_teldrive_token(payload: dict[str, Any] = Body(default={}), _: str = Depends(auth.require_auth)):
+def check_teldrive_token(payload: dict[str, Any] = Body(default={}), _: str = Depends(auth.require_auth)):
     try:
         c = config.read_config()
         token = str(payload.get("token", "")).strip() or None
@@ -356,7 +356,7 @@ async def check_teldrive_token(payload: dict[str, Any] = Body(default={}), _: st
         raise HTTPException(status_code=400, detail=str(exc))
 
 @app.get("/api/status")
-async def get_status(_: str = Depends(auth.require_auth)):
+def get_status(_: str = Depends(auth.require_auth)):
     disk = psutil.disk_usage('/')
     return {
         "success": True,
@@ -372,7 +372,7 @@ async def get_status(_: str = Depends(auth.require_auth)):
     }
 
 @app.post("/api/start")
-async def api_start_monitor(_: str = Depends(auth.require_auth)):
+def api_start_monitor(_: str = Depends(auth.require_auth)):
     try:
         result = monitor.start_monitor(config.read_config())
         return {"success": True, "message": f"Monitor {result}"}
@@ -380,12 +380,12 @@ async def api_start_monitor(_: str = Depends(auth.require_auth)):
         raise HTTPException(status_code=400, detail=str(exc))
 
 @app.post("/api/stop")
-async def api_stop_monitor(_: str = Depends(auth.require_auth)):
+def api_stop_monitor(_: str = Depends(auth.require_auth)):
     monitor.stop_monitor()
     return {"success": True, "message": "Monitor stopped"}
 
 @app.get("/api/events")
-async def get_events(
+def get_events(
     page: int = 1,
     limit: int = 10,
     ai_result: str | None = None,
@@ -417,7 +417,7 @@ async def get_events(
 
 
 @app.get("/api/recordings")
-async def get_recordings(
+def get_recordings(
     page: int = 1,
     limit: int = 10,
     camera: str | None = None,
@@ -443,7 +443,7 @@ async def get_recordings(
     }
 
 @app.delete("/api/events")
-async def clear_events(
+def clear_events(
     camera: str | None = None,
     _: str = Depends(auth.require_auth),
 ):
@@ -454,7 +454,7 @@ async def clear_events(
 
 
 @app.delete("/api/recordings")
-async def clear_recordings(
+def clear_recordings(
     camera: str | None = None,
     _: str = Depends(auth.require_auth),
 ):
@@ -464,7 +464,7 @@ async def clear_recordings(
     return {"success": True, "message": f"Deleted {deleted} recordings"}
 
 @app.post("/api/capture")
-async def capture(_: str = Depends(auth.require_auth)):
+def capture(_: str = Depends(auth.require_auth)):
     try:
         c = config.read_config()
         monitor.capture_snapshot(c)
@@ -473,7 +473,7 @@ async def capture(_: str = Depends(auth.require_auth)):
         raise HTTPException(status_code=400, detail=str(exc))
 
 @app.get("/api/camera/snapshot")
-async def get_camera_snapshot(index: int, refresh: bool = False, _: str = Depends(auth.require_auth)):
+def get_camera_snapshot(index: int, refresh: bool = False, _: str = Depends(auth.require_auth)):
     try:
         return camera_snapshot_response(index, refresh)
     except Exception as exc:
@@ -481,7 +481,7 @@ async def get_camera_snapshot(index: int, refresh: bool = False, _: str = Depend
 
 
 @app.get("/api/cameras/snapshot")
-async def get_cameras_snapshot(index: int, refresh: bool = False, _: str = Depends(auth.require_auth)):
+def get_cameras_snapshot(index: int, refresh: bool = False, _: str = Depends(auth.require_auth)):
     try:
         return camera_snapshot_response(index, refresh)
     except Exception as exc:
@@ -516,7 +516,7 @@ def camera_snapshot_response(index: int, refresh: bool = False) -> Response:
 
 
 @app.get("/api/camera/video")
-async def get_camera_video(index: int, _: str = Depends(auth.require_auth)):
+def get_camera_video(index: int, _: str = Depends(auth.require_auth)):
     try:
         c = config.read_config()
         camera = config.get_camera(c, index)
@@ -532,7 +532,7 @@ async def get_camera_video(index: int, _: str = Depends(auth.require_auth)):
         raise HTTPException(status_code=400, detail=str(exc))
 
 @app.post("/api/test-ai")
-async def test_ai(_: str = Depends(auth.require_auth)):
+def test_ai(_: str = Depends(auth.require_auth)):
     try:
         c = config.read_config()
         path = monitor.SNAPSHOT_PATH
@@ -544,7 +544,7 @@ async def test_ai(_: str = Depends(auth.require_auth)):
         raise HTTPException(status_code=400, detail=str(exc))
 
 @app.post("/api/test-ai-camera")
-async def test_ai_camera(index: int, _: str = Depends(auth.require_auth)):
+def test_ai_camera(index: int, _: str = Depends(auth.require_auth)):
     try:
         c = config.read_config()
         camera = config.get_camera(c, index)
@@ -556,7 +556,7 @@ async def test_ai_camera(index: int, _: str = Depends(auth.require_auth)):
         raise HTTPException(status_code=400, detail=str(exc))
 
 @app.post("/api/test-telegram")
-async def test_telegram(_: str = Depends(auth.require_auth)):
+def test_telegram(_: str = Depends(auth.require_auth)):
     try:
         c = config.read_config()
         path = monitor.SNAPSHOT_PATH
@@ -568,13 +568,9 @@ async def test_telegram(_: str = Depends(auth.require_auth)):
         raise HTTPException(status_code=400, detail=str(exc))
 
 @app.post("/api/test-ai-upload")
-async def test_ai_upload(request: Request, _: str = Depends(auth.require_auth)):
+def test_ai_upload(file: UploadFile = File(...), _: str = Depends(auth.require_auth)):
     try:
-        form = await request.form()
-        upload = form.get("file")
-        if not hasattr(upload, "read"):
-            raise ValueError("No file uploaded")
-        content = await upload.read()
+        content = file.file.read()
         if len(content) > 10 * 1024 * 1024:
             raise ValueError("File exceeds 10MB limit")
         
