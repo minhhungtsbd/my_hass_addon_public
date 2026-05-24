@@ -276,7 +276,7 @@ def record_go2rtc_clip(config: dict[str, Any], camera: dict[str, Any], output_pa
             "src": video_only_source(src),
             "duration": seconds,
             "filename": output_path.name,
-            "video": "h264",
+            "video": "h264,h265,hevc",
         },
         stream=True,
         timeout=seconds + 30,

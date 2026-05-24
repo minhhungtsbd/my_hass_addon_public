@@ -779,7 +779,7 @@
       try { const url = new URL(text); return url.searchParams.get("src") || url.pathname.replace(/\/+$/, "").split("/").pop() || ""; } catch { return text; }
     }
     function cameraSnapshotUrl(refresh = false) { return `/api/camera/snapshot?index=${state.index}${refresh ? "&refresh=1" : ""}&v=${Date.now()}`; }
-    function go2rtcStreamUrl(src) { return `${String(state.go2rtcUrl || "").replace(/\/$/, "")}/stream.html?src=${encodeURIComponent(src)}&mode=mse`; }
+    function go2rtcStreamUrl(src) { return `${String(state.go2rtcUrl || "").replace(/\/$/, "")}/stream.html?src=${encodeURIComponent(src)}`; }
     function liveSource() {
       const camera = state.camera || {};
       const liveMode = camera.live_mode || "auto";

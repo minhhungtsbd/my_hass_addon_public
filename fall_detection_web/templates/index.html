@@ -1192,7 +1192,7 @@
     }
     function go2rtcStreamUrl(src) {
       const base = String(state.config.go2rtc_url || "").replace(/\/$/, "");
-      return `${base}/stream.html?src=${encodeURIComponent(src)}&mode=mse`;
+      return `${base}/stream.html?src=${encodeURIComponent(src)}`;
     }
     function liveSource(camera, index) {
       const liveMode = camera.live_mode || "auto";
