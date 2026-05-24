@@ -440,6 +440,47 @@
       object-fit: contain;
     }
 
+    /* Camera Edit Form styles */
+    .form-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+    .field.full { grid-column: 1 / -1; }
+    .form-grid label { color: var(--muted); font-size: 12px; font-weight: 700; display: block; margin-bottom: 6px; }
+    .form-grid input, .form-grid select {
+      width: 100%;
+      min-height: 40px;
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      background: rgba(2, 6, 23, .42);
+      color: var(--text);
+      padding: 9px 11px;
+      outline: none;
+    }
+    .form-grid input[type="checkbox"] { width: 18px; min-height: 18px; accent-color: var(--good); }
+    .form-grid .check-row {
+      min-height: 40px;
+      display: flex;
+      align-items: center;
+      gap: 9px;
+      padding: 9px 11px;
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      background: rgba(2, 6, 23, .28);
+      color: var(--muted);
+      font-weight: 700;
+      font-size: 12px;
+    }
+    .stack { display: grid; gap: 10px; }
+    .help-text { color: var(--muted); display: block; font-size: 12px; margin-top: 5px; }
+    .loading-spinner {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      animation: spin 0.85s linear infinite;
+    }
+    @keyframes spin {
+      from { transform: rotate(0deg); }
+      to { transform: rotate(360deg); }
+    }
+
     #confirmDialog {
       width: min(440px, calc(100vw - 28px));
     }
@@ -533,6 +574,8 @@
             <div><h3 id="cameraName">Camera</h3><p class="muted" id="cameraMeta">Loading source.</p></div>
             <div class="actions">
               <a class="btn" href="/cameras"><span data-icon="arrow-left"></span>Back</a>
+              <button id="toggleBtn" class="btn" type="button">Enable</button>
+              <button id="editBtn" class="btn" type="button"><span data-icon="edit"></span>Edit</button>
               <button id="snapshotBtn" class="btn" type="button"><span data-icon="camera"></span>Snapshot</button>
               <button id="testAiBtn" class="btn primary" type="button"><span data-icon="spark"></span>Test AI</button>
             </div>
@@ -595,6 +638,66 @@
     </div>
     <div id="viewerBody" class="viewer-body"></div>
   </dialog>
+  <dialog id="cameraDialog">
+    <div class="dialog-head">
+      <div>
+        <h3 id="dialogTitle">Edit camera</h3>
+        <p class="help-text">Camera source and evidence options.</p>
+      </div>
+      <button class="btn small" data-close-dialog="cameraDialog" type="button">Close</button>
+    </div>
+    <div class="dialog-body">
+      <div class="form-grid">
+        <label class="check-row full"><input id="camEnabled" type="checkbox">Enabled</label>
+        <div class="field"><label for="camName">Tên camera / source go2rtc *</label><input id="camName" autocomplete="off" placeholder="h9c_cam1" required></div>
+        <div class="field"><label for="camPrompt">Prompt</label><select id="camPrompt"><option value="">Default prompt</option></select></div>
+        <div class="field full">
+          <label for="camGo2rtc">go2rtc frame URL hoặc source *</label>
+          <input id="camGo2rtc" autocomplete="off" placeholder="h9c_cam1 hoặc https://go2rtc.example/api/frame.jpeg?src=h9c_cam1">
+          <span class="help-text">Nguồn chính để lấy thumbnail, AI snapshot và monitor. Nếu chỉ nhập source ngắn, Settings phải có go2rtc URL chung. Nếu camera dùng hostname riêng, nhập full frame URL.</span>
+        </div>
+        <div class="field full">
+          <label for="camLive">go2rtc live URL</label>
+          <input id="camLive" autocomplete="off" placeholder="https://go2rtc.example/stream.html?src=h9c_cam1">
+          <span class="help-text">Tuỳ chọn. Nếu trống, web tự tạo live URL từ go2rtc URL chung và source.</span>
+        </div>
+        <div class="field full">
+          <label for="camRtsp">RTSP URL Camera (fallback)</label>
+          <input id="camRtsp" autocomplete="off" placeholder="rtsp://10.10.0.2:8554/h9c_cam1">
+          <span class="help-text">Chỉ dùng dự phòng khi không có go2rtc. Với HEVC/H.265 nên ưu tiên go2rtc để tránh live đen và log decode.</span>
+        </div>
+        <div class="field full">
+          <label for="camLiveMode">Chế độ live</label>
+          <select id="camLiveMode">
+            <option value="auto">Tự động: go2rtc iframe</option>
+            <option value="iframe">go2rtc iframe / MSE</option>
+            <option value="snapshot">Snapshot refresh cho HEVC</option>
+          </select>
+          <span class="help-text">HEVC/H.265 thường không hiển thị trong MSE trên browser. Chọn Snapshot refresh nếu live bị đen.</span>
+        </div>
+        <div class="field">
+          <label>Lưu trữ local</label>
+          <div class="stack">
+            <label class="check-row"><input id="camSaveImages" type="checkbox">Lưu ảnh sự kiện trên VPS</label>
+            <label class="check-row"><input id="camSaveVideos" type="checkbox">Lưu video ghi hình trên VPS</label>
+          </div>
+        </div>
+        <div class="field">
+          <label>Upload / ghi hình</label>
+          <div class="stack">
+            <label class="check-row"><input id="camUploadImages" type="checkbox">Upload ảnh sự kiện</label>
+            <label class="check-row"><input id="camRecordVideo" type="checkbox">Ghi và upload video</label>
+          </div>
+        </div>
+        <div class="field"><label for="camRecordSeconds">Thời lượng quay video (giây)</label><input id="camRecordSeconds" type="number" min="1"></div>
+        <div class="field"><label for="camRecordCooldown">Thời gian chờ trước lần quay tiếp theo (giây)</label><input id="camRecordCooldown" type="number" min="1"></div>
+      </div>
+    </div>
+    <div class="dialog-foot">
+      <button class="btn" data-close-dialog="cameraDialog" type="button">Cancel</button>
+      <button id="saveBtn" class="btn primary" type="button">Save camera</button>
+    </div>
+  </dialog>
   <script>
     const icons = {
       "shield-pulse": '<svg viewBox="0 0 24 24"><path d="M12 3l7 3v5c0 4.7-2.8 8.4-7 10-4.2-1.6-7-5.3-7-10V6l7-3z"/><path d="M8 12h2l1.2-3 2.1 6 1.1-3H16"/></svg>',
@@ -615,7 +718,8 @@
       "chevron-right": '<svg viewBox="0 0 24 24"><polyline points="9 18 15 12 9 6"/></svg>',
       video: '<svg viewBox="0 0 24 24"><rect x="3" y="5" width="14" height="14" rx="2"/><path d="M17 9l4-2v10l-4-2z"/></svg>',
       "prompt-icon": '<svg viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/><path d="M16 13H8M16 17H8"/></svg>',
-      "link-icon": '<svg viewBox="0 0 24 24"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>'
+      "link-icon": '<svg viewBox="0 0 24 24"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>',
+      edit: '<svg viewBox="0 0 24 24"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>'
     };
 
     document.querySelectorAll("[data-icon]").forEach(el => { el.innerHTML = icons[el.dataset.icon] || ""; });
@@ -740,6 +844,7 @@
       $("monitorStatus").textContent = running ? "Running" : "Stopped";
       $("runDot").className = `dot ${running ? "running" : "bad"}`;
       renderLive();
+      updateToggleBtn();
     }
     async function loadStatus() {
       const data = await api("/api/status");
@@ -877,6 +982,168 @@
       $("viewerDialog").showModal();
     }
 
+    function updateToggleBtn() {
+      const toggleBtn = $("toggleBtn");
+      if (!toggleBtn) return;
+      if (state.camera && state.camera.enabled) {
+        toggleBtn.textContent = "Disable";
+        toggleBtn.className = "btn danger";
+      } else {
+        toggleBtn.textContent = "Enable";
+        toggleBtn.className = "btn primary";
+      }
+    }
+
+    async function toggleCamera() {
+      const toggleBtn = $("toggleBtn");
+      if (!toggleBtn || !state.camera) return;
+      toggleBtn.disabled = true;
+      const originalEnabled = state.camera.enabled;
+      const originalText = toggleBtn.innerHTML;
+      
+      // Optimistic update
+      state.camera.enabled = !originalEnabled;
+      updateToggleBtn();
+      toggleBtn.innerHTML = `<span class="loading-spinner">${icons.refresh}</span>${originalEnabled ? "Disabling..." : "Enabling..."}`;
+      
+      try {
+        const data = await api("/api/cameras");
+        const cameras = data.cameras || [];
+        if (state.index >= 0 && state.index < cameras.length) {
+          cameras[state.index].enabled = !originalEnabled;
+          const saveRes = await api("/api/cameras", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ cameras })
+          });
+          state.camera = saveRes.cameras[state.index];
+          showToast(saveRes.message || "Camera status updated", "ok");
+        }
+      } catch (err) {
+        state.camera.enabled = originalEnabled;
+        showToast(err.message || "Failed to update camera status", "err");
+      } finally {
+        toggleBtn.disabled = false;
+        updateToggleBtn();
+        await loadCamera();
+      }
+    }
+
+    let allCameras = [];
+    
+    function isHttpUrl(value) {
+      try {
+        const url = new URL(value);
+        return url.protocol === "http:" || url.protocol === "https:";
+      } catch {
+        return false;
+      }
+    }
+    
+    function validateCamera(camera) {
+      if (!camera.name) return "Tên camera là bắt buộc.";
+      if (!camera.go2rtc_src && !camera.rtsp_url) return "Cần nhập go2rtc frame URL/source hoặc RTSP fallback.";
+      if (camera.go2rtc_src && !isHttpUrl(camera.go2rtc_src) && !state.go2rtcUrl) {
+        return "Bạn đang nhập go2rtc source ngắn. Hãy cấu hình go2rtc URL trong Settings hoặc nhập full frame URL.";
+      }
+      return "";
+    }
+
+    async function openEditDialog() {
+      const editBtn = $("editBtn");
+      editBtn.disabled = true;
+      try {
+        const data = await api("/api/cameras");
+        allCameras = data.cameras || [];
+        state.prompts = data.prompts || [];
+        state.go2rtcUrl = data.go2rtc_url || "";
+        
+        // Fill prompt select
+        const select = $("camPrompt");
+        select.innerHTML = '<option value="">Default prompt</option>';
+        state.prompts.forEach(prompt => {
+          const option = document.createElement("option");
+          option.value = prompt.id;
+          option.textContent = prompt.title || "Untitled prompt";
+          select.appendChild(option);
+        });
+
+        const camera = allCameras[state.index];
+        if (camera) {
+          $("camEnabled").checked = camera.enabled !== false;
+          $("camName").value = camera.name || "";
+          $("camPrompt").value = camera.prompt_id || "";
+          $("camRtsp").value = camera.rtsp_url || "";
+          $("camGo2rtc").value = camera.go2rtc_src || "";
+          $("camLive").value = camera.live_url || "";
+          $("camLiveMode").value = camera.live_mode || "auto";
+          $("camSaveImages").checked = camera.local_save_images !== false;
+          $("camSaveVideos").checked = camera.local_save_videos !== false;
+          $("camUploadImages").checked = camera.teldrive_upload_images !== false;
+          $("camRecordVideo").checked = camera.teldrive_record_enabled === true;
+          $("camRecordSeconds").value = camera.record_seconds || 10;
+          $("camRecordCooldown").value = camera.record_cooldown || 300;
+          $("cameraDialog").showModal();
+        }
+      } catch (err) {
+        showToast(err.message || "Failed to load camera configuration", "err");
+      } finally {
+        editBtn.disabled = false;
+      }
+    }
+
+    function readDialogCamera() {
+      return {
+        enabled: $("camEnabled").checked,
+        name: $("camName").value.trim(),
+        rtsp_url: $("camRtsp").value.trim(),
+        go2rtc_src: $("camGo2rtc").value.trim(),
+        live_url: $("camLive").value.trim(),
+        live_mode: $("camLiveMode").value,
+        prompt_id: $("camPrompt").value,
+        local_save_images: $("camSaveImages").checked,
+        local_save_videos: $("camSaveVideos").checked,
+        teldrive_upload_images: $("camUploadImages").checked,
+        teldrive_record_enabled: $("camRecordVideo").checked,
+        record_seconds: Math.max(1, Number($("camRecordSeconds").value || 10)),
+        record_cooldown: Math.max(1, Number($("camRecordCooldown").value || 300))
+      };
+    }
+
+    async function saveEditedCamera() {
+      const camera = readDialogCamera();
+      const validation = validateCamera(camera);
+      if (validation) {
+        showToast(validation, "err");
+        return;
+      }
+      
+      const saveBtn = $("saveBtn");
+      saveBtn.disabled = true;
+      try {
+        allCameras[state.index] = camera;
+        const data = await api("/api/cameras", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ cameras: allCameras })
+        });
+        
+        $("cameraDialog").close();
+        showToast(data.message || "Camera updated successfully", "ok");
+        
+        // If name has changed, redirect. Otherwise reload.
+        if (camera.name !== routeCameraName) {
+          window.location.href = `/camera/${encodeURIComponent(camera.name)}`;
+        } else {
+          await loadCamera();
+        }
+      } catch (err) {
+        showToast(err.message || "Failed to save camera", "err");
+      } finally {
+        saveBtn.disabled = false;
+      }
+    }
+
     document.addEventListener("click", event => {
       const playBtn = event.target.closest(".play-recording");
       if (playBtn) {
@@ -985,6 +1252,9 @@
       const data = await api(`/api/recordings?camera=${encodeURIComponent(camera)}`, { method:"DELETE" });
       showToast(data.message || "Recordings cleared", "ok"); state.recordingsPage = 1; await loadRecordings();
     };
+    $("toggleBtn").onclick = () => toggleCamera().catch(err => showToast(err.message, "err"));
+    $("editBtn").onclick = () => openEditDialog().catch(err => showToast(err.message, "err"));
+    $("saveBtn").onclick = () => saveEditedCamera().catch(err => showToast(err.message, "err"));
     loadPreferences();
     loadCamera().then(() => Promise.all([loadStatus(), loadEvents(), loadRecordings()])).catch(err => showToast(err.message, "err"));
     setInterval(() => loadStatus().catch(() => {}), 10000);
