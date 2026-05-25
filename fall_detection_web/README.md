@@ -102,6 +102,86 @@ Nếu bạn muốn lưu trữ video sự cố lên Telegram không giới hạn 
 
 ---
 
+## Hướng Dẫn Cài Đặt & Cấu Hình go2rtc
+
+Để ứng dụng Web lấy được ảnh chụp (snapshot) của camera và phát trực tiếp (live stream) mượt mà, bạn cần cài đặt dịch vụ **go2rtc**.
+
+### 1. Hướng dẫn cài đặt nhanh go2rtc trên Linux (VPS)
+
+Bạn có thể chạy go2rtc trực tiếp bằng file binary hoặc Docker:
+
+#### Cách 1: Chạy trực tiếp bằng Binary file (Khuyên dùng vì nhẹ nhất)
+```bash
+# Tải phiên bản mới nhất từ Github Release (chọn bản phù hợp với CPU amd64 hoặc arm64)
+wget https://github.com/AlexxIT/go2rtc/releases/latest/download/go2rtc_linux_amd64 -O go2rtc
+chmod +x go2rtc
+
+# Khởi chạy go2rtc để tạo file cấu hình mẫu
+./go2rtc
+```
+
+Để chạy ngầm go2rtc như một service hệ thống trên VPS, tạo file service systemd:
+```bash
+sudo nano /etc/systemd/system/go2rtc.service
+```
+Dán nội dung cấu hình service sau (sửa lại thư mục `/opt/go2rtc` cho phù hợp với thư mục chứa file binary của bạn):
+```ini
+[Unit]
+Description=go2rtc service
+After=network.target
+
+[Service]
+ExecStart=/opt/go2rtc/go2rtc
+Restart=always
+RestartSec=5
+WorkingDirectory=/opt/go2rtc
+
+[Install]
+WantedBy=multi-user.target
+```
+Sau đó kích hoạt chạy ngầm cùng hệ thống:
+```bash
+sudo systemctl daemon-reload
+sudo systemctl enable --now go2rtc
+```
+
+---
+
+### 2. Cấu hình kết nối go2rtc trong Web App
+
+Sau khi go2rtc đã chạy, bạn hãy cập nhật tham số **go2rtc URL** trong menu **Settings** của ứng dụng Web tùy thuộc vào mô hình mạng của bạn:
+
+#### Trường hợp A: Sử dụng IP Local (go2rtc và Web App nằm trên cùng 1 VPS/Server)
+* Sử dụng cổng mặc định của go2rtc là `1984`.
+* Nhập vào phần Settings của Web App:
+  ```text
+  http://127.0.0.1:1984
+  ```
+
+#### Trường hợp B: Sử dụng IP LAN hoặc IP Public (go2rtc chạy ở máy chủ/mạng khác)
+* Nếu kết nối qua mạng nội bộ LAN:
+  ```text
+  http://192.168.1.100:1984
+  ```
+* Nếu kết nối qua Internet bằng IP Public của VPS/Server (hãy nhớ mở cổng `1984` trên tường lửa VPS và Router nhà bạn):
+  ```text
+  http://<IP-PUBLIC-CUA-VPS>:1984
+  ```
+
+#### Trường hợp C: Sử dụng Tên Miền Công Khai qua Cloudflare Tunnel (Khuyên dùng để có HTTPS miễn phí và bảo mật cao)
+Nếu bạn đưa go2rtc ra Internet an toàn thông qua Cloudflare Tunnel (ví dụ: `go2rtc.yourdomain.com`):
+* Tạo một Cloudflare Tunnel trỏ tên miền `go2rtc.yourdomain.com` về cổng local `1984` của máy chạy go2rtc.
+* Nhập URL HTTPS vào phần Settings của Web App:
+  ```text
+  https://go2rtc.yourdomain.com
+  ```
+* **Lưu ý về WebRTC khi qua Cloudflare Tunnel:**
+  * Cloudflare Tunnel hỗ trợ truyền tải HTTP và WebSockets hoàn hảo nên các chức năng lấy snapshot (`frame.jpeg`) và xem live stream MSE/HLS sẽ hoạt động ổn định ngay.
+  * Tuy nhiên, giao thức WebRTC (để truyền tải video trễ thấp hỗ trợ HEVC tốt nhất) yêu cầu cổng UDP `8555` và Cloudflare proxy thông thường sẽ chặn cổng này.
+  * **Giải pháp:** Nếu live stream WebRTC bị đen do Cloudflare chặn cổng, trình phát go2rtc trên Web UI sẽ tự động nhận diện và hạ cấp luồng kết nối xuống **MSE/HLS** mà không gây gián đoạn cho bạn. Để WebRTC hoạt động song song qua Internet, bạn có thể mở cổng `8555` (TCP/UDP) trực tiếp trên IP Public của máy chạy go2rtc.
+
+---
+
 ## Hướng Hẫn Thiết Lập Camera (Cameras)
 
 Truy cập menu **Cameras** > **Add Camera** hoặc chỉnh sửa camera hiện tại bằng nút **Edit** trong trang chi tiết camera. Hãy điền các thông số theo hướng dẫn sau để camera hoạt động tối ưu nhất:
