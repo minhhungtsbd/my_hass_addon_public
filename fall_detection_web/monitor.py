@@ -117,11 +117,41 @@ def upload_event_image_safe(config: dict[str, Any], image_path: Path, camera_nam
         insert_event("teldrive_image_error", camera=camera_name, error=str(exc))
 
 
+def upload_recording_thumbnail_if_needed(
+    config: dict[str, Any],
+    camera_config: dict[str, Any] | None,
+    camera_name: str,
+    event_id: int,
+    image_file: str,
+) -> None:
+    if not image_file:
+        return
+    upload_images = True if camera_config is None else camera_config.get("teldrive_upload_images") is not False
+    save_local_images = True if camera_config is None else camera_config.get("local_save_images") is not False
+    image_path = db.EVENT_IMAGES_DIR / Path(image_file).name
+    if not image_path.exists() or not upload_images or not teldrive.enabled(config):
+        return
+    try:
+        file_data = teldrive.upload_event_image(config, image_path, camera_name, file_name=image_path.name)
+        if file_data:
+            db.update_event_teldrive_image(event_id, file_data)
+            if not save_local_images:
+                try:
+                    image_path.unlink()
+                    logger.info("[RECORD] removed local recording thumbnail file=%s", image_path.name)
+                except OSError as exc:
+                    logger.warning("[RECORD] could not remove local recording thumbnail file=%s error=%s", image_path.name, exc)
+    except Exception as exc:
+        logger.warning("[TELDRIVE] recording thumbnail upload failed camera=%s: %s", camera_name, exc)
+        insert_event("teldrive_image_error", camera=camera_name, error=str(exc))
+
+
 def upload_event_video_safe(
     config: dict[str, Any],
     video_path: Path,
     camera_name: str,
     thumbnail_path: Path | None = None,
+    camera_config: dict[str, Any] | None = None,
     event_time: str = "",
     event_time_local: str = "",
 ) -> bool:
@@ -132,7 +162,7 @@ def upload_event_video_safe(
         if not video_id or not video_name:
             raise RuntimeError("Teldrive upload did not return file id/name")
         save_thumbnail = thumbnail_path is not None and thumbnail_path.exists()
-        insert_event(
+        event = insert_event(
             "teldrive_video_uploaded",
             image_path=thumbnail_path if save_thumbnail else None,
             save_image=save_thumbnail,
@@ -144,6 +174,7 @@ def upload_event_video_safe(
             event_time=event_time,
             event_time_local=event_time_local,
         )
+        upload_recording_thumbnail_if_needed(config, camera_config, camera_name, int(event["id"]), str(event.get("image_file", "")))
         return True
     except Exception as exc:
         logger.warning("[TELDRIVE] video upload failed camera=%s: %s", camera_name, exc)
@@ -258,6 +289,7 @@ def cleanup_uploaded_local_clips(config: dict[str, Any]) -> int:
                 path,
                 camera_name,
                 thumbnail_path=extract_video_thumbnail(path),
+                camera_config=camera,
                 event_time=meta.get("event_time", ""),
                 event_time_local=meta.get("event_time_local", ""),
             )
@@ -487,7 +519,7 @@ def record_and_upload_clip(
             if go2rtc_path:
                 with lock:
                     thumbnail_path = save_frame_thumbnail(holder.get("frame"), video_thumbnail_path(go2rtc_path))
-                uploaded = upload_event_video_safe(config, go2rtc_path, camera_name, thumbnail_path=thumbnail_path)
+                uploaded = upload_event_video_safe(config, go2rtc_path, camera_name, thumbnail_path=thumbnail_path, camera_config=camera)
                 cleanup_recording_if_needed(camera, go2rtc_path, uploaded)
                 return
         except Exception as exc:
@@ -535,7 +567,7 @@ def record_and_upload_clip(
 
     if raw_path and raw_path.exists() and raw_path.stat().st_size > 0:
         logger.info("[RECORD] raw clip saved file=%s", raw_path.name)
-        uploaded = upload_event_video_safe(config, raw_path, camera_name, thumbnail_path=extract_video_thumbnail(raw_path))
+        uploaded = upload_event_video_safe(config, raw_path, camera_name, thumbnail_path=extract_video_thumbnail(raw_path), camera_config=camera)
         cleanup_recording_if_needed(camera, raw_path, uploaded)
 
 
