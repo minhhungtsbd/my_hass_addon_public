@@ -447,6 +447,13 @@ def get_recordings(
         camera = None
     offset = (page - 1) * limit
     recordings = db.get_recordings(limit=limit, offset=offset, camera=camera, date_from=date_from, date_to=date_to)
+    c = config.read_config()
+    for item in recordings:
+        video_id = str(item.get("teldrive_video_id", "")).strip()
+        video_name = str(item.get("teldrive_video_name", "")).strip()
+        if video_id and video_name:
+            item["video_proxy_url"] = item.get("video_url", "")
+            item["video_url"] = teldrive.file_url(c, video_id, video_name)
     total = db.get_recordings_total(camera=camera, date_from=date_from, date_to=date_to)
     return {
         "success": True,

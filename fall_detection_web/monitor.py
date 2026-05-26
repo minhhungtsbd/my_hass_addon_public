@@ -129,8 +129,6 @@ def upload_event_video_safe(config: dict[str, Any], video_path: Path, camera_nam
             teldrive_video_name=video_name,
             teldrive_video_path=str(file_data.get("path", "")),
         )
-        if video_id and video_name:
-            teldrive.prewarm_file(config, video_id, video_name)
         return True
     except Exception as exc:
         logger.warning("[TELDRIVE] video upload failed camera=%s: %s", camera_name, exc)
