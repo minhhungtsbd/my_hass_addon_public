@@ -70,6 +70,11 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "teldrive_record_seconds": 10,
     "teldrive_record_cooldown": 300,
     "jwt_secret": "",
+    "redis_enabled": False,
+    "redis_host": "127.0.0.1",
+    "redis_port": 6379,
+    "redis_db": 0,
+    "redis_password": "",
 }
 
 # Keys that env vars can override (env key → config key)
@@ -98,12 +103,17 @@ ENV_CONFIG_KEYS: dict[str, str] = {
     "TELDRIVE_RECORD_SECONDS": "teldrive_record_seconds",
     "TELDRIVE_RECORD_COOLDOWN": "teldrive_record_cooldown",
     "JWT_SECRET": "jwt_secret",
+    "REDIS_ENABLED": "redis_enabled",
+    "REDIS_HOST": "redis_host",
+    "REDIS_PORT": "redis_port",
+    "REDIS_DB": "redis_db",
+    "REDIS_PASSWORD": "redis_password",
 }
 
 # Numeric keys that need type coercion when read from DB (stored as TEXT)
-_INT_KEYS = {"yolo_imgsz", "verify_interval", "alert_cooldown", "frame_skip", "teldrive_record_seconds", "teldrive_record_cooldown"}
+_INT_KEYS = {"yolo_imgsz", "verify_interval", "alert_cooldown", "frame_skip", "teldrive_record_seconds", "teldrive_record_cooldown", "redis_port", "redis_db"}
 _FLOAT_KEYS = {"confidence", "loop_sleep"}
-_BOOL_KEYS = {"teldrive_enabled", "teldrive_upload_images", "teldrive_record_enabled"}
+_BOOL_KEYS = {"teldrive_enabled", "teldrive_upload_images", "teldrive_record_enabled", "redis_enabled"}
 
 
 def normalize_go2rtc_source(value: Any) -> str:
@@ -364,6 +374,12 @@ def write_config(new_config: dict[str, Any]) -> dict[str, Any]:
     clean["teldrive_enabled"] = _coerce("teldrive_enabled", clean["teldrive_enabled"])
     clean["teldrive_upload_images"] = _coerce("teldrive_upload_images", clean["teldrive_upload_images"])
     clean["teldrive_record_enabled"] = _coerce("teldrive_record_enabled", clean["teldrive_record_enabled"])
+    clean["redis_enabled"] = _coerce("redis_enabled", clean["redis_enabled"])
+    clean["redis_port"] = positive_int(clean["redis_port"], "redis_port")
+    try:
+        clean["redis_db"] = max(0, int(clean["redis_db"]))
+    except (TypeError, ValueError):
+        clean["redis_db"] = 0
     clean["loop_sleep"] = max(0.0, float(clean["loop_sleep"]))
     clean["cameras"] = normalize_cameras(clean)
     clean["prompts"] = normalize_prompts(clean)

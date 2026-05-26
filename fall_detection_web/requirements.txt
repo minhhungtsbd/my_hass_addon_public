@@ -11,3 +11,4 @@ bcrypt
 python-jose[cryptography]
 jinja2
 psutil
+redis

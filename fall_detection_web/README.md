@@ -112,6 +112,14 @@ Nếu bạn muốn lưu trữ video sự cố lên Telegram không giới hạn 
 * **Teldrive Token**: Token JWT/Bearer để xác thực tài khoản Teldrive.
 * **Teldrive Root Path**: Đường dẫn thư mục gốc để lưu trữ (ví dụ: `/Fall Detection`).
 
+### 5. Cấu hình Bộ Nhớ Đệm Redis (Tùy chọn - Giúp tối ưu hóa toàn diện & load mượt mà)
+Để kích hoạt tốc độ tải trang cực nhanh (sub-millisecond) và giảm tải truy vấn cho cơ sở dữ liệu SQLite, bạn có thể bật Redis Cache:
+* **Redis Enabled**: Tích chọn để kích hoạt bộ đệm (chỉ bật khi đã cài đặt Redis Server).
+* **Redis Host**: Địa chỉ kết nối Redis (mặc định: `127.0.0.1`).
+* **Redis Port**: Cổng kết nối Redis (mặc định: `6379`).
+* **Redis DB**: Chỉ số cơ sở dữ liệu Redis sử dụng (mặc định: `0`).
+* **Redis Password**: Mật khẩu xác thực Redis (nếu có).
+
 ---
 
 ## Hướng Dẫn Cài Đặt & Cấu Hình go2rtc
@@ -268,6 +276,36 @@ Truy cập menu **Cameras** > **Add Camera** hoặc chỉnh sửa camera hiện 
    # Xem log hoạt động theo thời gian thực
    journalctl -u fall-detection -f
    ```
+
+---
+
+## Hướng Dẫn Cài Đặt Redis Server
+
+Để sử dụng tính năng Redis Caching giúp tối ưu hóa website, bạn cần cài đặt dịch vụ Redis Server trên hệ thống:
+
+### 1. Trên Linux (Ubuntu / Debian VPS)
+
+Chạy các lệnh sau trong Terminal để cài đặt và kích hoạt Redis:
+```bash
+# Cài đặt dịch vụ Redis Server
+sudo apt update
+sudo apt install -y redis-server
+
+# Kích hoạt dịch vụ chạy ngầm cùng hệ thống
+sudo systemctl enable --now redis-server
+
+# Kiểm tra trạng thái hoạt động
+sudo systemctl status redis-server
+```
+
+### 2. Trên Windows
+Bạn có thể cài đặt Redis trên Windows thông qua môi trường WSL, hoặc chạy nhanh bằng Docker:
+```bash
+docker run -d --name redis-cache -p 6379:6379 redis:alpine
+```
+
+### 3. Cơ chế tự động dự phòng (Fail-safe)
+Ứng dụng được thiết kế vô cùng an toàn. Nếu dịch vụ Redis Server bị dừng hoặc chưa được cấu hình, Web App sẽ **tự động bỏ qua cache** và truy vấn dữ liệu trực tiếp từ cơ sở dữ liệu SQLite/Disk một cách trơn tru, tuyệt đối không gây lỗi crash hay làm gián đoạn luồng giám sát an ninh.
 
 ---
 

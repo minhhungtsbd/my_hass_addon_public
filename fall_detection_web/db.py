@@ -228,6 +228,17 @@ def _prune_events(conn: sqlite3.Connection) -> None:
         logger.info("[DB] Pruned %d old events", to_delete)
 
 
+def invalidate_event_caches() -> None:
+    try:
+        import config as _config
+        import redis_cache as _redis_cache
+        c = _config.read_config()
+        _redis_cache.clear_cache_pattern("events:list:*", c)
+        _redis_cache.clear_cache_pattern("recordings:list:*", c)
+    except Exception as exc:
+        logger.warning("[DB] Failed to invalidate Redis caches: %s", exc)
+
+
 def insert_event(status_name: str, image_path: Path | None = None, save_image: bool = True, **fields: Any) -> dict[str, Any]:
     image_file = save_event_image(image_path, status_name) if save_image else ""
     t = str(fields.get("event_time") or now_iso())
@@ -258,6 +269,7 @@ def insert_event(status_name: str, image_path: Path | None = None, save_image: b
         )
         event_id = cur.lastrowid
         _prune_events(conn)
+    invalidate_event_caches()
     return {"id": event_id, "image_file": image_file}
 
 
@@ -272,6 +284,7 @@ def update_event_teldrive_image(event_id: int, file_data: dict[str, Any]) -> Non
                 event_id,
             ),
         )
+    invalidate_event_caches()
 
 
 def update_event_image(event_id: int, image_path: Path, status_name: str = "recording_thumb") -> str:
@@ -280,6 +293,7 @@ def update_event_image(event_id: int, image_path: Path, status_name: str = "reco
         return ""
     with get_conn() as conn:
         conn.execute("UPDATE events SET image_file=? WHERE id=?", (image_file, event_id))
+    invalidate_event_caches()
     return image_file
 
 
@@ -446,6 +460,7 @@ def clear_events(camera: str | None = None, recordings_only: bool = False, exclu
             path.unlink()
         except OSError:
             pass
+    invalidate_event_caches()
     return deleted
 
 
@@ -478,6 +493,7 @@ def delete_old_events(days: int = 7) -> int:
 
     if deleted > 0:
         logger.info("[DB] Deleted %d events older than %d days", deleted, days)
+    invalidate_event_caches()
     return deleted
 
 

@@ -21,6 +21,7 @@ import config
 import db
 import monitor
 import teldrive
+import redis_cache
 
 logger = logging.getLogger("fall_detection_web")
 logging.basicConfig(level=logging.INFO, format="[%(levelname)s] %(message)s")
@@ -421,8 +422,18 @@ def check_teldrive_token(payload: dict[str, Any] = Body(default={}), _: str = De
 
 @app.get("/api/status")
 def get_status(_: str = Depends(auth.require_auth)):
+    c = config.read_config()
+    if c.get("redis_enabled"):
+        cached = redis_cache.get_cache("status:data", c)
+        if cached:
+            import json
+            try:
+                return json.loads(cached)
+            except Exception:
+                pass
+
     disk = psutil.disk_usage('/')
-    return {
+    data = {
         "success": True,
         "status": monitor.read_state(),
         "event_count": db.count_events(),
@@ -434,6 +445,15 @@ def get_status(_: str = Depends(auth.require_auth)):
             "disk_total_gb": round(disk.total / (1024**3), 1),
         }
     }
+
+    if c.get("redis_enabled"):
+        import json
+        try:
+            redis_cache.set_cache("status:data", json.dumps(data), 2, c)
+        except Exception:
+            pass
+
+    return data
 
 @app.post("/api/start")
 def api_start_monitor(_: str = Depends(auth.require_auth)):
@@ -466,18 +486,38 @@ def get_events(
         ai_result = None
     if camera == "" or camera == "All":
         camera = None
+
+    c = config.read_config()
+    cache_key = f"events:list:{page}:{limit}:{ai_result or 'all'}:{camera or 'all'}"
+    if c.get("redis_enabled"):
+        cached = redis_cache.get_cache(cache_key, c)
+        if cached:
+            import json
+            try:
+                return json.loads(cached)
+            except Exception:
+                pass
         
     offset = (page - 1) * limit
     events = db.get_events(limit=limit, offset=offset, ai_result=ai_result, camera=camera)
     total = db.get_events_total(ai_result=ai_result, camera=camera)
     
-    return {
+    data = {
         "success": True, 
         "events": events,
         "total": total,
         "page": page,
         "limit": limit
     }
+
+    if c.get("redis_enabled"):
+        import json
+        try:
+            redis_cache.set_cache(cache_key, json.dumps(data), 3600, c)
+        except Exception:
+            pass
+
+    return data
 
 
 @app.get("/api/recordings")
@@ -495,9 +535,20 @@ def get_recordings(
         limit = 10
     if camera == "" or camera == "All":
         camera = None
+
+    c = config.read_config()
+    cache_key = f"recordings:list:{page}:{limit}:{camera or 'all'}:{date_from or 'all'}:{date_to or 'all'}"
+    if c.get("redis_enabled"):
+        cached = redis_cache.get_cache(cache_key, c)
+        if cached:
+            import json
+            try:
+                return json.loads(cached)
+            except Exception:
+                pass
+
     offset = (page - 1) * limit
     recordings = db.get_recordings(limit=limit, offset=offset, camera=camera, date_from=date_from, date_to=date_to)
-    c = config.read_config()
     for item in recordings:
         video_id = str(item.get("teldrive_video_id", "")).strip()
         video_name = str(item.get("teldrive_video_name", "")).strip()
@@ -505,13 +556,23 @@ def get_recordings(
             item["video_proxy_url"] = item.get("video_url", "")
             item["video_url"] = teldrive.file_url(c, video_id, video_name)
     total = db.get_recordings_total(camera=camera, date_from=date_from, date_to=date_to)
-    return {
+    
+    data = {
         "success": True,
         "recordings": recordings,
         "total": total,
         "page": page,
         "limit": limit,
     }
+
+    if c.get("redis_enabled"):
+        import json
+        try:
+            redis_cache.set_cache(cache_key, json.dumps(data), 3600, c)
+        except Exception:
+            pass
+
+    return data
 
 @app.delete("/api/events")
 def clear_events(
