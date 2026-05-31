@@ -39,7 +39,7 @@ async def lifespan(app: FastAPI):
     db.delete_old_events(7)        # clean up old events/images at startup
     config.migrate_config_json()   # one-time: config.json → DB
     current_config = config.read_config()
-    monitor.schedule_uploaded_local_clips_cleanup(current_config, reason="startup")
+    monitor.start_local_clips_maintenance(current_config)
     
     # Init auth secret from config or env
     jwt_secret = current_config.get("jwt_secret")
@@ -70,6 +70,7 @@ async def lifespan(app: FastAPI):
         
     yield
     # Shutdown
+    monitor.stop_local_clips_maintenance(wait=True)
     monitor.stop_monitor(wait=True)
 
 

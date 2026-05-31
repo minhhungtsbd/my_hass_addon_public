@@ -390,7 +390,7 @@ def get_recordings_total(camera: str | None = None, date_from: str | None = None
 def get_uploaded_video_records() -> list[dict[str, str]]:
     with get_conn() as conn:
         rows = conn.execute(
-            "SELECT id, camera, message, image_file, teldrive_video_name FROM events "
+            "SELECT id, camera, message, image_file, teldrive_image_id, teldrive_video_name FROM events "
             "WHERE teldrive_video_id IS NOT NULL AND teldrive_video_id != ''"
         ).fetchall()
     return [
@@ -399,6 +399,7 @@ def get_uploaded_video_records() -> list[dict[str, str]]:
             "camera": str(row["camera"] or ""),
             "message": str(row["message"] or ""),
             "image_file": str(row["image_file"] or ""),
+            "teldrive_image_id": str(row["teldrive_image_id"] or ""),
             "teldrive_video_name": str(row["teldrive_video_name"] or ""),
         }
         for row in rows

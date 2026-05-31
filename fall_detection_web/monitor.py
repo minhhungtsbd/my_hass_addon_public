@@ -34,6 +34,14 @@ worker_thread: threading.Thread | None = None
 monitor_lock = threading.Lock()
 cleanup_lock = threading.Lock()
 cleanup_thread: threading.Thread | None = None
+maintenance_lock = threading.Lock()
+maintenance_stop_event = threading.Event()
+maintenance_thread: threading.Thread | None = None
+maintenance_config: dict[str, Any] = {}
+
+CLIP_MAINTENANCE_INTERVAL_SECONDS = 600
+CLIP_RETRY_MIN_AGE_SECONDS = 300
+TEMP_THUMB_MAX_AGE_SECONDS = 600
 
 # Fault tolerance state variables for API outages
 ai_suspended_until_ts = 0.0
@@ -147,7 +155,15 @@ def upload_recording_thumbnail_if_needed(
     upload_images = True if camera_config is None else camera_config.get("teldrive_upload_images") is not False
     save_local_images = True if camera_config is None else camera_config.get("local_save_images") is not False
     image_path = db.EVENT_IMAGES_DIR / Path(image_file).name
-    if not image_path.exists() or not upload_images or not teldrive.enabled(config):
+    if not image_path.exists():
+        return
+    if not upload_images:
+        if not save_local_images:
+            remove_local_recording_thumbnail(image_path)
+        return
+    if time.time() < upload_suspended_until_ts:
+        return
+    if not teldrive.enabled(config):
         return
     try:
         file_data = teldrive.upload_event_image(config, image_path, camera_name, file_name=image_path.name)
@@ -162,6 +178,17 @@ def upload_recording_thumbnail_if_needed(
     except Exception as exc:
         logger.warning("[TELDRIVE] recording thumbnail upload failed camera=%s: %s", camera_name, exc)
         insert_event("teldrive_image_error", camera=camera_name, error=str(exc))
+
+
+def remove_local_recording_thumbnail(image_path: Path) -> bool:
+    try:
+        if image_path.exists():
+            image_path.unlink()
+            logger.info("[RECORD] removed local recording thumbnail file=%s", image_path.name)
+            return True
+    except OSError as exc:
+        logger.warning("[RECORD] could not remove local recording thumbnail file=%s error=%s", image_path.name, exc)
+    return False
 
 
 def upload_event_video_safe(
@@ -261,8 +288,11 @@ def clip_metadata_from_name(path: Path) -> dict[str, str]:
         dt = datetime.strptime(stem[:15], "%Y%m%dT%H%M%S").replace(tzinfo=timezone.utc)
     except ValueError:
         return {}
+    camera_key = stem[16:]
+    if camera_key.endswith("_raw"):
+        camera_key = camera_key[:-4]
     return {
-        "camera_key": stem[16:],
+        "camera_key": camera_key,
         "event_time": dt.isoformat(timespec="seconds"),
         "event_time_local": dt.astimezone(db.LOCAL_TZ).isoformat(timespec="seconds"),
     }
@@ -279,6 +309,75 @@ def cleanup_temp_thumbnail(video_path: Path) -> None:
             thumb_path.unlink()
     except OSError as exc:
         logger.warning("[RECORD] could not remove thumbnail file=%s error=%s", thumb_path.name, exc)
+
+
+def cleanup_orphan_temp_thumbnails() -> int:
+    if not CLIPS_DIR.exists():
+        return 0
+    deleted = 0
+    cutoff = time.time() - TEMP_THUMB_MAX_AGE_SECONDS
+    for thumb_path in CLIPS_DIR.glob("*_thumb.jpg"):
+        try:
+            if thumb_path.stat().st_mtime >= cutoff:
+                continue
+            stem = thumb_path.stem[:-6]
+            video_exists = any((CLIPS_DIR / f"{stem}{suffix}").exists() for suffix in (".mp4", ".avi"))
+            if video_exists:
+                continue
+            thumb_path.unlink()
+            deleted += 1
+            logger.info("[RECORD] removed orphan temporary thumbnail file=%s", thumb_path.name)
+        except OSError as exc:
+            logger.warning("[RECORD] could not inspect or remove thumbnail file=%s error=%s", thumb_path.name, exc)
+    return deleted
+
+
+def cleanup_uploaded_recording_thumbnail(
+    config: dict[str, Any],
+    camera: dict[str, Any],
+    camera_name: str,
+    uploaded_record: dict[str, str],
+    video_path: Path,
+) -> None:
+    image_file = str(uploaded_record.get("image_file", "")).strip()
+    if not image_file:
+        thumb_path = extract_video_thumbnail(video_path)
+        if thumb_path:
+            try:
+                image_file = db.update_event_image(int(uploaded_record["id"]), thumb_path)
+            except Exception as exc:
+                logger.warning("[RECORD] could not attach recording thumbnail file=%s error=%s", video_path.name, exc)
+    if not image_file:
+        return
+    image_path = db.EVENT_IMAGES_DIR / Path(image_file).name
+    if uploaded_record.get("teldrive_image_id"):
+        if camera.get("local_save_images") is False:
+            remove_local_recording_thumbnail(image_path)
+        return
+    upload_recording_thumbnail_if_needed(config, camera, camera_name, int(uploaded_record["id"]), image_file)
+
+
+def reconcile_uploaded_recording_thumbnails(config: dict[str, Any], cameras: list[dict[str, Any]], uploaded_records: list[dict[str, str]]) -> int:
+    camera_by_name = {str(camera.get("name", "")).strip(): camera for camera in cameras}
+    deleted = 0
+    for record in uploaded_records:
+        camera_name = str(record.get("camera", "")).strip()
+        camera = camera_by_name.get(camera_name)
+        image_file = str(record.get("image_file", "")).strip()
+        if not camera or not image_file:
+            continue
+        image_path = db.EVENT_IMAGES_DIR / Path(image_file).name
+        if not image_path.exists():
+            continue
+        if record.get("teldrive_image_id"):
+            if camera.get("local_save_images") is False and remove_local_recording_thumbnail(image_path):
+                deleted += 1
+            continue
+        existed_before = image_path.exists()
+        upload_recording_thumbnail_if_needed(config, camera, camera_name, int(record["id"]), image_file)
+        if existed_before and not image_path.exists():
+            deleted += 1
+    return deleted
 
 
 def save_frame_thumbnail(frame: Any, output_path: Path) -> Path | None:
@@ -325,7 +424,9 @@ def cleanup_uploaded_local_clips(config: dict[str, Any]) -> int:
             if safe_name:
                 uploaded_by_name[safe_name] = record
     uploaded_names = set(uploaded_by_name)
-    deleted = 0
+    deleted = cleanup_orphan_temp_thumbnails()
+    deleted += reconcile_uploaded_recording_thumbnails(config, cameras, uploaded_records)
+    retry_suspended_logged = False
     for path in sorted(CLIPS_DIR.iterdir()):
         if not path.is_file() or path.suffix.lower() not in {".mp4", ".avi"}:
             continue
@@ -339,8 +440,13 @@ def cleanup_uploaded_local_clips(config: dict[str, Any]) -> int:
             if not teldrive.enabled(config):
                 logger.info("[RECORD] keeping local clip without Teldrive config file=%s", path.name)
                 continue
-            # Skip retry if the file is less than 1 hour (3600 seconds) old to avoid race conditions with active uploads
-            if time.time() - path.stat().st_mtime < 3600:
+            if time.time() < upload_suspended_until_ts:
+                if not retry_suspended_logged:
+                    logger.info("[RECORD] skipping local clip retries while Teldrive upload is suspended")
+                    retry_suspended_logged = True
+                continue
+            # Avoid racing with clips that may still be written or uploaded by the recorder thread.
+            if time.time() - path.stat().st_mtime < CLIP_RETRY_MIN_AGE_SECONDS:
                 logger.info("[RECORD] skipping retry for brand new clip file=%s", path.name)
                 continue
             logger.info("[RECORD] retrying Teldrive upload for local clip file=%s", path.name)
@@ -358,13 +464,8 @@ def cleanup_uploaded_local_clips(config: dict[str, Any]) -> int:
             else:
                 continue
         uploaded_record = uploaded_by_name.get(path.name)
-        if uploaded_record and not uploaded_record.get("image_file"):
-            thumb_path = extract_video_thumbnail(path)
-            if thumb_path:
-                try:
-                    db.update_event_image(int(uploaded_record["id"]), thumb_path)
-                except Exception as exc:
-                    logger.warning("[RECORD] could not attach recording thumbnail file=%s error=%s", path.name, exc)
+        if uploaded_record:
+            cleanup_uploaded_recording_thumbnail(config, camera, camera_name, uploaded_record, path)
         if keep_local_by_camera.get(camera_name, True):
             cleanup_temp_thumbnail(path)
             continue
@@ -380,6 +481,7 @@ def cleanup_uploaded_local_clips(config: dict[str, Any]) -> int:
 
 def schedule_uploaded_local_clips_cleanup(config: dict[str, Any], reason: str = "") -> str:
     global cleanup_thread
+    update_local_clips_maintenance_config(config)
     with cleanup_lock:
         if cleanup_thread and cleanup_thread.is_alive():
             logger.info("[RECORD] local clip cleanup already running; skip schedule reason=%s", reason)
@@ -396,6 +498,43 @@ def schedule_uploaded_local_clips_cleanup(config: dict[str, Any], reason: str = 
         cleanup_thread.start()
         logger.info("[RECORD] scheduled local clip cleanup reason=%s", reason)
         return "scheduled"
+
+
+def update_local_clips_maintenance_config(config: dict[str, Any]) -> None:
+    global maintenance_config
+    with maintenance_lock:
+        maintenance_config = config.copy()
+
+
+def start_local_clips_maintenance(config: dict[str, Any]) -> str:
+    global maintenance_thread
+    update_local_clips_maintenance_config(config)
+    with maintenance_lock:
+        if maintenance_thread and maintenance_thread.is_alive():
+            return "already running"
+        maintenance_stop_event.clear()
+
+        def run_maintenance() -> None:
+            while not maintenance_stop_event.is_set():
+                with maintenance_lock:
+                    current_config = maintenance_config.copy()
+                schedule_uploaded_local_clips_cleanup(current_config, reason="periodic")
+                maintenance_stop_event.wait(CLIP_MAINTENANCE_INTERVAL_SECONDS)
+
+        maintenance_thread = threading.Thread(target=run_maintenance, daemon=True, name="clip-maintenance")
+        maintenance_thread.start()
+        logger.info("[RECORD] started local clip maintenance interval=%ss", CLIP_MAINTENANCE_INTERVAL_SECONDS)
+        return "started"
+
+
+def stop_local_clips_maintenance(wait: bool = False) -> None:
+    global maintenance_thread
+    maintenance_stop_event.set()
+    thread = maintenance_thread
+    if wait and thread and thread.is_alive():
+        thread.join(timeout=2)
+    if thread and not thread.is_alive():
+        maintenance_thread = None
 
 
 def safe_camera_name(camera_name: str) -> str:
