@@ -302,7 +302,8 @@ def get_events(
     limit: int = 100, 
     offset: int = 0, 
     ai_result: str | None = None, 
-    camera: str | None = None
+    camera: str | None = None,
+    status: str | None = None
 ) -> list[dict[str, Any]]:
     query = "SELECT * FROM events"
     params = []
@@ -314,6 +315,9 @@ def get_events(
     if camera:
         conditions.append("camera = ?")
         params.append(camera)
+    if status:
+        conditions.append("status = ?")
+        params.append(status)
         
     if conditions:
         query += " WHERE " + " AND ".join(conditions)
@@ -407,7 +411,7 @@ def get_uploaded_video_records() -> list[dict[str, str]]:
     ]
 
 
-def get_events_total(ai_result: str | None = None, camera: str | None = None) -> int:
+def get_events_total(ai_result: str | None = None, camera: str | None = None, status: str | None = None) -> int:
     query = "SELECT COUNT(*) FROM events"
     params = []
     conditions = []
@@ -418,6 +422,9 @@ def get_events_total(ai_result: str | None = None, camera: str | None = None) ->
     if camera:
         conditions.append("camera = ?")
         params.append(camera)
+    if status:
+        conditions.append("status = ?")
+        params.append(status)
         
     if conditions:
         query += " WHERE " + " AND ".join(conditions)

@@ -475,6 +475,7 @@ def get_events(
     limit: int = 10,
     ai_result: str | None = None,
     camera: str | None = None,
+    status: str | None = None,
     _: str = Depends(auth.require_auth)
 ):
     if page < 1:
@@ -487,9 +488,11 @@ def get_events(
         ai_result = None
     if camera == "" or camera == "All":
         camera = None
+    if status == "" or status == "All":
+        status = None
 
     c = config.read_config()
-    cache_key = f"events:list:{page}:{limit}:{ai_result or 'all'}:{camera or 'all'}"
+    cache_key = f"events:list:{page}:{limit}:{ai_result or 'all'}:{camera or 'all'}:{status or 'all'}"
     if c.get("redis_enabled"):
         cached = redis_cache.get_cache(cache_key, c)
         if cached:
@@ -500,8 +503,8 @@ def get_events(
                 pass
         
     offset = (page - 1) * limit
-    events = db.get_events(limit=limit, offset=offset, ai_result=ai_result, camera=camera)
-    total = db.get_events_total(ai_result=ai_result, camera=camera)
+    events = db.get_events(limit=limit, offset=offset, ai_result=ai_result, camera=camera, status=status)
+    total = db.get_events_total(ai_result=ai_result, camera=camera, status=status)
     
     data = {
         "success": True, 

@@ -108,7 +108,10 @@ def capture_rtsp_snapshot(rtsp_url: str, output_path: Path) -> Path:
 
 
 def log_event(config: dict[str, Any], status_name: str, image_path: Path | None = None, camera_config: dict[str, Any] | None = None, **fields: Any) -> None:
-    save_local_images = True if camera_config is None else camera_config.get("local_save_images") is not False
+    if status_name == "verified":
+        save_local_images = True
+    else:
+        save_local_images = True if camera_config is None else camera_config.get("local_save_images") is not False
     event = insert_event(status_name, image_path=image_path, save_image=save_local_images, **fields)
     image_file = str(event.get("image_file", ""))
     upload_images = True if camera_config is None else camera_config.get("teldrive_upload_images") is not False

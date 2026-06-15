@@ -618,6 +618,13 @@
           <div class="panel-head">
             <div><h3>Camera Events</h3><p class="muted">Timeline filtered to this camera.</p></div>
             <div class="toolbar">
+              <select id="eventFilterStatus">
+                <option value="">All statuses</option>
+                <option value="verified" selected>verified</option>
+                <option value="teldrive_video_uploaded">teldrive_video_uploaded</option>
+                <option value="stream_reconnect">stream_reconnect</option>
+                <option value="ai_error">ai_error</option>
+              </select>
               <select id="eventFilterAI"><option value="">All AI results</option><option>SAFE</option><option>EMERGENCY</option></select>
               <select id="eventPageSize"><option>10</option><option>25</option><option>50</option></select>
               <button id="refreshEventsBtn" class="btn" type="button"><span data-icon="refresh"></span>Refresh</button>
@@ -864,7 +871,13 @@
     }
     async function loadEvents() {
       const limit = Number($("eventPageSize").value || 10);
-      const params = new URLSearchParams({ page:String(state.eventsPage), limit:String(limit), ai_result:$("eventFilterAI").value, camera:state.camera.name || routeCameraName });
+      const params = new URLSearchParams({
+        page: String(state.eventsPage),
+        limit: String(limit),
+        ai_result: $("eventFilterAI").value,
+        status: $("eventFilterStatus").value,
+        camera: state.camera.name || routeCameraName
+      });
       const data = await api(`/api/events?${params}`);
       state.eventsTotal = data.total || 0;
       const events = data.events || [];
@@ -1226,6 +1239,7 @@
         localStorage.setItem("pref_recording_mask_cover", $("recordingMaskCover").checked ? "1" : "0");
         
         localStorage.setItem("pref_event_filter_ai", $("eventFilterAI").value);
+        localStorage.setItem("pref_event_filter_status", $("eventFilterStatus").value);
         localStorage.setItem("pref_event_page_size", $("eventPageSize").value);
       } catch (e) {
         console.error("Failed to save preferences to localStorage", e);
@@ -1252,6 +1266,13 @@
         const eventFilter = localStorage.getItem("pref_event_filter_ai");
         if (eventFilter) $("eventFilterAI").value = eventFilter;
 
+        const eventStatusFilter = localStorage.getItem("pref_event_filter_status");
+        if (eventStatusFilter !== null) {
+          $("eventFilterStatus").value = eventStatusFilter;
+        } else {
+          $("eventFilterStatus").value = "verified"; // Default filter is verified
+        }
+
         const eventPageSize = localStorage.getItem("pref_event_page_size");
         if (eventPageSize) $("eventPageSize").value = eventPageSize;
 
@@ -1264,7 +1285,7 @@
     }
 
     $("refreshEventsBtn").onclick = () => { state.eventsPage = 1; loadEvents().catch(err => showToast(err.message, "err")); };
-    $("eventFilterAI").onchange = $("eventPageSize").onchange = () => {
+    $("eventFilterAI").onchange = $("eventFilterStatus").onchange = $("eventPageSize").onchange = () => {
       savePreferences();
       state.eventsPage = 1;
       loadEvents();
