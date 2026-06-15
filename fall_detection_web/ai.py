@@ -118,8 +118,27 @@ def response_ai_content(response: requests.Response) -> str:
 # Verdict parsing
 # ──────────────────────────────────────────────
 
+def strip_thinking_content(text: str) -> str:
+    import re
+    if not text:
+        return ""
+    # Strip <think>...</think> blocks
+    cleaned = re.sub(r"(?i)<think>.*?</think>", "", text, flags=re.DOTALL)
+    # Strip truncated open <think> blocks
+    cleaned = re.sub(r"(?i)<think>.*$", "", cleaned, flags=re.DOTALL)
+    # Strip lines starting with "Thought for " or "Thinking "
+    lines = []
+    for line in cleaned.splitlines():
+        l_upper = line.strip().upper()
+        if l_upper.startswith("THOUGHT FOR") or l_upper.startswith("THINKING"):
+            continue
+        lines.append(line)
+    return "\n".join(lines).strip()
+
+
 def normalize_ai_result(content: str) -> str:
-    upper = content.upper()
+    cleaned = strip_thinking_content(content)
+    upper = cleaned.upper()
     if "EMERGENCY" in upper:
         return "EMERGENCY"
     if "SAFE" in upper:
@@ -133,7 +152,8 @@ def short_text(value: str, limit: int = 20) -> str:
 
 
 def parse_ai_verdict(content: str) -> tuple[str, str, str]:
-    lines = [line.strip() for line in str(content).splitlines() if line.strip()]
+    cleaned = strip_thinking_content(content)
+    lines = [line.strip() for line in str(cleaned).splitlines() if line.strip()]
     result = ""
     description = ""
 
@@ -145,15 +165,15 @@ def parse_ai_verdict(content: str) -> tuple[str, str, str]:
             result = "SAFE"
 
     if not result:
-        result = normalize_ai_result(content)
+        result = normalize_ai_result(cleaned)
 
     for line in lines[1:]:
-        cleaned = line
+        cleaned_line = line
         for prefix in ("DESC:", "DESCRIPTION:", "MÔ TẢ:", "MO TA:", "-", "2."):
-            if cleaned.upper().startswith(prefix):
-                cleaned = cleaned[len(prefix):].strip()
-        if cleaned.upper() not in {"SAFE", "EMERGENCY"}:
-            description = cleaned
+            if cleaned_line.upper().startswith(prefix):
+                cleaned_line = cleaned_line[len(prefix):].strip()
+        if cleaned_line.upper() not in {"SAFE", "EMERGENCY"}:
+            description = cleaned_line
             break
 
     if not description:
@@ -184,7 +204,7 @@ def _call_vision_api(model_name: str, prompt_text: str, image_path: Path, config
                 ],
             }
         ],
-        "max_tokens": 100,
+        "max_tokens": 1000,
         "stream": False,
     }
     headers = {
