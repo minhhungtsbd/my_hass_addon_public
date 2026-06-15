@@ -521,6 +521,36 @@ def get_events(
     return data
 
 
+@app.get("/api/events/trends")
+def get_events_trends(_: str = Depends(auth.require_auth)):
+    c = config.read_config()
+    cache_key = "events:trends"
+    if c.get("redis_enabled"):
+        cached = redis_cache.get_cache(cache_key, c)
+        if cached:
+            import json
+            try:
+                return json.loads(cached)
+            except Exception:
+                pass
+
+    trends = db.get_incident_trends(days=7)
+    data = {
+        "success": True,
+        "trends": trends
+    }
+
+    if c.get("redis_enabled"):
+        import json
+        try:
+            redis_cache.set_cache(cache_key, json.dumps(data), 3600, c)
+        except Exception:
+            pass
+
+    return data
+
+
+
 @app.get("/api/recordings")
 def get_recordings(
     page: int = 1,

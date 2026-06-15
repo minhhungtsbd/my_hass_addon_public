@@ -235,6 +235,7 @@ def invalidate_event_caches() -> None:
         c = _config.read_config()
         _redis_cache.clear_cache_pattern("events:list:*", c)
         _redis_cache.clear_cache_pattern("recordings:list:*", c)
+        _redis_cache.delete_cache("events:trends", c)
     except Exception as exc:
         logger.warning("[DB] Failed to invalidate Redis caches: %s", exc)
 
@@ -496,6 +497,22 @@ def delete_old_events(days: int = 7) -> int:
         logger.info("[DB] Deleted %d events older than %d days", deleted, days)
     invalidate_event_caches()
     return deleted
+
+
+def get_incident_trends(days: int = 7) -> list[dict[str, Any]]:
+    cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat(timespec="seconds")
+    query = """
+        SELECT 
+            substr(coalesce(time_local, time), 1, 10) as date_str,
+            upper(coalesce(ai_result, status)) as result,
+            COUNT(*) as count
+        FROM events
+        WHERE time >= ?
+        GROUP BY date_str, result
+    """
+    with get_conn() as conn:
+        rows = conn.execute(query, (cutoff,)).fetchall()
+    return [dict(row) for row in rows]
 
 
 # ──────────────────────────────────────────────

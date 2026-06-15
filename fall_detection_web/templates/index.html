@@ -1361,23 +1361,21 @@
 
     async function loadChartData() {
       try {
-        const data = await api("/api/events?limit=300");
-        const events = data.events || [];
+        const data = await api("/api/events/trends");
+        const trends = data.trends || [];
         const past7 = getPast7Days();
         const safeCounts = new Array(7).fill(0);
         const emergencyCounts = new Array(7).fill(0);
 
-        events.forEach(event => {
-          const timeLocal = event.time_local || event.time;
-          if (!timeLocal) return;
-          const datePart = timeLocal.split('T')[0];
+        trends.forEach(item => {
+          const datePart = item.date_str;
           const idx = past7.dates.indexOf(datePart);
           if (idx !== -1) {
-            const result = String(event.ai_result || event.status || "").toUpperCase();
+            const result = String(item.result || "").toUpperCase();
             if (result === "SAFE") {
-              safeCounts[idx]++;
+              safeCounts[idx] += item.count;
             } else if (result === "EMERGENCY") {
-              emergencyCounts[idx]++;
+              emergencyCounts[idx] += item.count;
             }
           }
         });
