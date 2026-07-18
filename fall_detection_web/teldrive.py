@@ -115,8 +115,9 @@ def ensure_folder(config: dict[str, Any], folder: str) -> None:
         try:
             response.raise_for_status()
         except requests.HTTPError as exc:
+            err_msg = f"{exc}. Chi tiết: {response.text[:200]}"
             logger.error("[TELDRIVE] mkdir failed status=%s body=%s", response.status_code, response.text[:500])
-            raise exc
+            raise RuntimeError(err_msg) from exc
 
 
 def upload_file(config: dict[str, Any], local_path: Path, folder: str, file_name: str | None = None) -> dict[str, Any]:
@@ -153,8 +154,9 @@ def upload_file(config: dict[str, Any], local_path: Path, folder: str, file_name
     try:
         upload_response.raise_for_status()
     except requests.HTTPError as exc:
+        err_msg = f"{exc}. Chi tiết: {upload_response.text[:200]}"
         logger.error("[TELDRIVE] upload part failed status=%s body=%s", upload_response.status_code, upload_response.text[:500])
-        raise exc
+        raise RuntimeError(err_msg) from exc
     uploaded_part = upload_response.json()
 
     parts_response = _session.get(
@@ -165,8 +167,9 @@ def upload_file(config: dict[str, Any], local_path: Path, folder: str, file_name
     try:
         parts_response.raise_for_status()
     except requests.HTTPError as exc:
+        err_msg = f"{exc}. Chi tiết: {parts_response.text[:200]}"
         logger.error("[TELDRIVE] get parts failed status=%s body=%s", parts_response.status_code, parts_response.text[:500])
-        raise exc
+        raise RuntimeError(err_msg) from exc
     uploaded_parts = parts_response.json()
     if not uploaded_parts:
         uploaded_parts = [uploaded_part]
@@ -200,8 +203,9 @@ def upload_file(config: dict[str, Any], local_path: Path, folder: str, file_name
     try:
         file_response.raise_for_status()
     except requests.HTTPError as exc:
+        err_msg = f"{exc}. Chi tiết: {file_response.text[:200]}"
         logger.error("[TELDRIVE] file commit failed status=%s body=%s", file_response.status_code, file_response.text[:500])
-        raise exc
+        raise RuntimeError(err_msg) from exc
     logger.info("[TELDRIVE] uploaded %s to %s", file_name, folder)
     return file_response.json()
 
