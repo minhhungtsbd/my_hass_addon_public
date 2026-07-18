@@ -481,6 +481,13 @@
         <label class="check-row full"><input id="camEnabled" type="checkbox">Enabled</label>
         <div class="field"><label for="camName">Tên camera / source go2rtc *</label><input id="camName" autocomplete="off" placeholder="h9c_cam1" required></div>
         <div class="field"><label for="camPrompt">Prompt</label><select id="camPrompt"><option value="">Default prompt</option></select></div>
+        <div class="field">
+          <label for="camCodec">Video Codec *</label>
+          <select id="camCodec">
+            <option value="h264">H.264 (Native go2rtc)</option>
+            <option value="h265">H.265 (FFmpeg transcode)</option>
+          </select>
+        </div>
         <div class="field full">
           <label for="camGo2rtc">go2rtc frame URL hoặc source *</label>
           <input id="camGo2rtc" autocomplete="off" placeholder="h9c_cam1 hoặc https://go2rtc.example/api/frame.jpeg?src=h9c_cam1">
@@ -517,6 +524,7 @@
           <div class="stack">
             <label class="check-row"><input id="camUploadImages" type="checkbox">Upload ảnh sự kiện</label>
             <label class="check-row"><input id="camRecordVideo" type="checkbox">Ghi và upload video</label>
+            <label class="check-row"><input id="camRecordAudio" type="checkbox">Ghi kèm âm thanh</label>
           </div>
         </div>
         <div class="field"><label for="camRecordSeconds">Thời lượng quay video (giây)</label><input id="camRecordSeconds" type="number" min="1"></div>
@@ -664,7 +672,8 @@
               </div>
               <div class="meta">
                 <span class="badge">Prompt: ${esc(promptTitle(camera.prompt_id))}</span>
-                <span class="badge ${camera.teldrive_record_enabled ? "good" : ""}">Record: ${camera.teldrive_record_enabled ? "On" : "Off"}</span>
+                <span class="badge">Codec: ${esc((camera.video_codec || "h264").toUpperCase())}</span>
+                <span class="badge ${camera.teldrive_record_enabled ? "good" : ""}">${camera.teldrive_record_enabled ? (camera.record_audio ? "Video + Audio" : "Video Only") : "Record: Off"}</span>
               </div>
               <div class="actions">
                 <a class="btn small" href="/camera/${encodeURIComponent(name)}">Open detail</a>
@@ -705,11 +714,13 @@
         sourceText.textContent = camera.rtsp_url || camera.go2rtc_src || camera.live_url || "No source configured";
       }
       
-      const badges = card.querySelectorAll(".meta .badge");
-      if (badges.length >= 2) {
-        badges[0].textContent = `Prompt: ${promptTitle(camera.prompt_id)}`;
-        badges[1].className = `badge ${camera.teldrive_record_enabled ? "good" : ""}`;
-        badges[1].textContent = `Record: ${camera.teldrive_record_enabled ? "On" : "Off"}`;
+      const meta = card.querySelector(".meta");
+      if (meta) {
+        meta.innerHTML = `
+          <span class="badge">Prompt: ${esc(promptTitle(camera.prompt_id))}</span>
+          <span class="badge">Codec: ${esc((camera.video_codec || "h264").toUpperCase())}</span>
+          <span class="badge ${camera.teldrive_record_enabled ? "good" : ""}">${camera.teldrive_record_enabled ? (camera.record_audio ? "Video + Audio" : "Video Only") : "Record: Off"}</span>
+        `;
       }
       
       const thumb = card.querySelector(".thumb");
@@ -766,12 +777,13 @@
       const camera = index >= 0 ? state.cameras[index] : {
         enabled: true, name: "", rtsp_url: "", go2rtc_src: "", live_url: "", live_mode: "auto", prompt_id: "",
         local_save_images: true, local_save_videos: true, teldrive_upload_images: true, teldrive_record_enabled: false,
-        record_seconds: 10, record_cooldown: 300
+        record_seconds: 10, record_cooldown: 300, video_codec: "h264", record_audio: false
       };
       $("dialogTitle").textContent = index >= 0 ? "Edit camera" : "Add camera";
       $("camEnabled").checked = camera.enabled !== false;
       $("camName").value = camera.name || "";
       $("camPrompt").value = camera.prompt_id || "";
+      $("camCodec").value = camera.video_codec || "h264";
       $("camRtsp").value = camera.rtsp_url || "";
       $("camGo2rtc").value = camera.go2rtc_src || "";
       $("camLive").value = camera.live_url || "";
@@ -780,6 +792,7 @@
       $("camSaveVideos").checked = camera.local_save_videos !== false;
       $("camUploadImages").checked = camera.teldrive_upload_images !== false;
       $("camRecordVideo").checked = camera.teldrive_record_enabled === true;
+      $("camRecordAudio").checked = camera.record_audio === true;
       $("camRecordSeconds").value = camera.record_seconds || 10;
       $("camRecordCooldown").value = camera.record_cooldown || 300;
       $("cameraDialog").showModal();
@@ -793,10 +806,12 @@
         live_url: $("camLive").value.trim(),
         live_mode: $("camLiveMode").value,
         prompt_id: $("camPrompt").value,
+        video_codec: $("camCodec").value,
         local_save_images: $("camSaveImages").checked,
         local_save_videos: $("camSaveVideos").checked,
         teldrive_upload_images: $("camUploadImages").checked,
         teldrive_record_enabled: $("camRecordVideo").checked,
+        record_audio: $("camRecordAudio").checked,
         record_seconds: Math.max(1, Number($("camRecordSeconds").value || 10)),
         record_cooldown: Math.max(1, Number($("camRecordCooldown").value || 300))
       };

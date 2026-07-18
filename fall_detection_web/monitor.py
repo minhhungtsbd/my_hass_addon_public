@@ -693,6 +693,88 @@ def record_go2rtc_clip(config: dict[str, Any], camera: dict[str, Any], output_pa
     return None
 
 
+def get_rtsp_input_url(config: dict[str, Any], camera: dict[str, Any]) -> str | None:
+    rtsp_url = str(camera.get("rtsp_url", "")).strip()
+    if rtsp_url:
+        return rtsp_url
+    
+    src = go2rtc_source(camera)
+    if src:
+        # Extract host from go2rtc_url
+        go2rtc_url = str(config.get("go2rtc_url", "")).strip()
+        if go2rtc_url:
+            parsed = urlparse(go2rtc_url)
+            host = parsed.hostname or "127.0.0.1"
+            return f"rtsp://{host}:8554/{src}"
+        return f"rtsp://127.0.0.1:8554/{src}"
+        
+    return None
+
+
+def record_ffmpeg_clip(config: dict[str, Any], camera: dict[str, Any], output_path: Path) -> Path | None:
+    import subprocess
+    
+    input_url = get_rtsp_input_url(config, camera)
+    if not input_url:
+        logger.warning("[RECORD] FFmpeg record failed: No RTSP URL or go2rtc source configured")
+        return None
+        
+    seconds = int(camera.get("record_seconds", config.get("teldrive_record_seconds", 10)))
+    video_codec = camera.get("video_codec", "h264")
+    record_audio = bool(camera.get("record_audio", False))
+    
+    # Construct FFmpeg command
+    # -y: overwrite output files
+    # -rtsp_transport tcp: force TCP for RTSP stability
+    # -t <seconds>: limit duration
+    cmd = ["ffmpeg", "-y", "-rtsp_transport", "tcp", "-i", input_url, "-t", str(seconds)]
+    
+    # Video encoding
+    if video_codec == "h265":
+        # Transcode H.265 to H.264
+        cmd.extend(["-c:v", "libx264", "-preset", "ultrafast", "-tune", "zerolatency"])
+    else:
+        # H.264 camera: copy video codec directly to save CPU
+        cmd.extend(["-c:v", "copy"])
+        
+    # Audio encoding
+    if record_audio:
+        # Transcode audio to AAC for browser compatibility
+        cmd.extend(["-c:a", "aac"])
+    else:
+        # Disable audio
+        cmd.extend(["-an"])
+        
+    cmd.append(str(output_path))
+    
+    logger.info("[RECORD] running FFmpeg command: %s", " ".join(cmd))
+    
+    try:
+        process = subprocess.run(
+            cmd,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            timeout=seconds + 15,
+        )
+        if process.returncode != 0:
+            stderr_str = process.stderr.decode("utf-8", errors="ignore")
+            logger.error("[RECORD] FFmpeg failed with exit code %s: %s", process.returncode, stderr_str)
+            return None
+            
+        if output_path.exists() and output_path.stat().st_size > 0:
+            logger.info("[RECORD] FFmpeg mp4 clip saved successfully: %s", output_path.name)
+            return output_path
+            
+    except FileNotFoundError:
+        logger.error("[RECORD] FFmpeg executable not found in system PATH. Please install FFmpeg.")
+    except subprocess.TimeoutExpired:
+        logger.error("[RECORD] FFmpeg process timed out after %ss", seconds + 15)
+    except Exception as exc:
+        logger.error("[RECORD] FFmpeg process failed: %s", exc)
+        
+    return None
+
+
 def record_and_upload_clip(
     config: dict[str, Any],
     camera: dict[str, Any],
@@ -716,16 +798,40 @@ def record_and_upload_clip(
         base_path = CLIPS_DIR / f"{stamp}_{safe_camera}"
         final_path = base_path.with_suffix(".mp4")
 
-        try:
-            go2rtc_path = record_go2rtc_clip(config, camera, final_path)
-            if go2rtc_path:
-                with lock:
-                    thumbnail_path = save_frame_thumbnail(holder.get("frame"), video_thumbnail_path(go2rtc_path))
-                uploaded = upload_event_video_safe(config, go2rtc_path, camera_name, thumbnail_path=thumbnail_path, camera_config=camera)
-                cleanup_recording_if_needed(camera, go2rtc_path, uploaded)
-                return
-        except Exception as exc:
-            logger.warning("[RECORD] go2rtc clip failed camera=%s: %s", camera_name, exc)
+        video_codec = camera.get("video_codec", "h264")
+        record_audio = bool(camera.get("record_audio", False))
+        prefer_go2rtc = (video_codec == "h264" and not record_audio)
+        recorded_path = None
+
+        if prefer_go2rtc:
+            try:
+                recorded_path = record_go2rtc_clip(config, camera, final_path)
+            except Exception as exc:
+                logger.warning("[RECORD] go2rtc clip failed camera=%s: %s. Falling back to FFmpeg...", camera_name, exc)
+
+            if not recorded_path:
+                try:
+                    recorded_path = record_ffmpeg_clip(config, camera, final_path)
+                except Exception as exc:
+                    logger.warning("[RECORD] FFmpeg fallback clip failed camera=%s: %s", camera_name, exc)
+        else:
+            try:
+                recorded_path = record_ffmpeg_clip(config, camera, final_path)
+            except Exception as exc:
+                logger.warning("[RECORD] FFmpeg clip failed camera=%s: %s. Falling back to go2rtc...", camera_name, exc)
+
+            if not recorded_path and video_codec == "h264":
+                try:
+                    recorded_path = record_go2rtc_clip(config, camera, final_path)
+                except Exception as exc:
+                    logger.warning("[RECORD] go2rtc fallback clip failed camera=%s: %s", camera_name, exc)
+
+        if recorded_path:
+            with lock:
+                thumbnail_path = save_frame_thumbnail(holder.get("frame"), video_thumbnail_path(recorded_path))
+            uploaded = upload_event_video_safe(config, recorded_path, camera_name, thumbnail_path=thumbnail_path, camera_config=camera)
+            cleanup_recording_if_needed(camera, recorded_path, uploaded)
+            return
 
         while time.time() < deadline and not stop_event.is_set():
             with lock:
