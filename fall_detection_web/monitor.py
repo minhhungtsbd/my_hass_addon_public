@@ -560,13 +560,16 @@ def is_http_url(value: str) -> bool:
 
 
 def video_only_source(src: str) -> str:
-    parsed = urlparse(str(src or "").strip())
+    src_str = str(src or "").strip()
+    parsed = urlparse(src_str)
     if parsed.scheme not in {"rtsp", "rtsps", "rtspx"}:
-        return src
+        if "#" not in src_str:
+            return f"{src_str}#video"
+        return src_str
     flags = [item for item in parsed.fragment.split("#") if item]
     keys = {item.split("=", 1)[0] for item in flags}
-    if "media" not in keys:
-        flags.append("media=video")
+    if "media" not in keys and "video" not in keys:
+        flags.append("video")
     if "backchannel" not in keys:
         flags.append("backchannel=0")
     return urlunparse(parsed._replace(fragment="#".join(flags)))
