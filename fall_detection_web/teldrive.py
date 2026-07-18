@@ -126,10 +126,14 @@ def upload_file(config: dict[str, Any], local_path: Path, folder: str, file_name
     if not local_path.exists():
         raise FileNotFoundError(str(local_path))
 
+    size = local_path.stat().st_size
+    if size == 0:
+        logger.warning("[TELDRIVE] skipping upload for 0-byte empty file: %s", local_path.name)
+        return {"id": "skipped_empty", "name": file_name or local_path.name, "size": 0}
+
     ensure_folder(config, folder)
     file_name = file_name or local_path.name
     upload_id = uuid.uuid4().hex
-    size = local_path.stat().st_size
     mime_type = _mime_type(file_name)
     channel_id = str(config.get("teldrive_channel_id", "")).strip()
 
