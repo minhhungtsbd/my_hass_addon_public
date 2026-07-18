@@ -28,6 +28,15 @@ logging.basicConfig(level=logging.INFO, format="[%(levelname)s] %(message)s")
 
 ROOT = Path(__file__).resolve().parent
 DATA_DIR = ROOT / "data"
+DATA_DIR.mkdir(parents=True, exist_ok=True)
+
+# Setup file logging
+LOG_FILE = DATA_DIR / "app.log"
+file_handler = logging.FileHandler(str(LOG_FILE), encoding="utf-8")
+file_formatter = logging.Formatter("[%(asctime)s] [%(levelname)s] %(message)s", datefmt="%Y-%m-%d %H:%M:%S")
+file_handler.setFormatter(file_formatter)
+file_handler.setLevel(logging.INFO)
+logger.addHandler(file_handler)
 
 # Setup Jinja2 templates
 templates = Jinja2Templates(directory=str(ROOT / "templates"))
@@ -151,9 +160,35 @@ def camera_page(request: Request, camera_name: str, _: str = Depends(auth.requir
 
 @app.get("/{page_name}", response_class=HTMLResponse)
 def app_page(request: Request, page_name: str, _: str = Depends(auth.require_auth)):
-    if page_name not in {"dashboard", "prompts", "live", "settings", "tools"}:
+    if page_name not in {"dashboard", "prompts", "live", "settings", "tools", "logs"}:
         raise HTTPException(status_code=404, detail="Page not found")
     return templates.TemplateResponse(request=request, name="index.html", context={})
+
+
+@app.get("/api/logs")
+def get_logs(_: str = Depends(auth.require_auth)):
+    log_file = DATA_DIR / "app.log"
+    if not log_file.exists():
+        return {"logs": ""}
+    try:
+        # Read the last 1000 lines of the log file for performance
+        with log_file.open("r", encoding="utf-8", errors="ignore") as f:
+            lines = f.readlines()
+            last_lines = lines[-1000:]
+            return {"logs": "".join(last_lines)}
+    except Exception as exc:
+        return {"logs": f"Error reading log file: {exc}"}
+
+
+@app.post("/api/logs/clear")
+def clear_logs(_: str = Depends(auth.require_auth)):
+    log_file = DATA_DIR / "app.log"
+    try:
+        if log_file.exists():
+            log_file.write_text("", encoding="utf-8")
+        return {"message": "Logs cleared"}
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc))
 
 
 @app.get("/api/event-image/{filename}")

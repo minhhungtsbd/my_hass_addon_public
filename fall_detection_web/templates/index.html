@@ -627,6 +627,7 @@
         <button class="nav-btn" data-view="live" type="button"><span data-icon="monitor"></span>Live View</button>
         <button class="nav-btn" data-view="settings" type="button"><span data-icon="settings"></span>Settings</button>
         <button class="nav-btn" data-view="tools" type="button"><span data-icon="wrench"></span>Tools</button>
+        <button class="nav-btn" data-view="logs" type="button"><span data-icon="file-text"></span>System Logs</button>
       </nav>
 
       <div class="sidebar-foot">
@@ -873,6 +874,29 @@
           </section>
         </div>
       </section>
+
+      <section id="view-logs" class="view">
+        <div class="grid cols-1">
+          <section class="panel">
+            <div class="panel-head">
+              <div>
+                <h3>System Logs</h3>
+                <p>Xem logs hệ thống thời gian thực.</p>
+              </div>
+              <div class="actions">
+                <button id="copyLogBtn" class="btn small" type="button"><span data-icon="copy"></span>Copy Logs</button>
+                <button id="clearLogBtn" class="btn small danger" type="button"><span data-icon="trash"></span>Clear Logs</button>
+                <button id="refreshLogBtn" class="btn small" type="button"><span data-icon="refresh"></span>Refresh</button>
+                <label style="display:flex; align-items:center; gap:6px; font-size:12px; color:var(--muted);">
+                  <input id="autoScrollLog" type="checkbox" checked style="width:16px; min-height:16px; margin:0;">
+                  Auto-Scroll
+                </label>
+              </div>
+            </div>
+            <pre id="logContent" style="height: calc(100vh - 200px); overflow: auto; background: #020617; border: 1px solid var(--line); border-radius: var(--radius); padding: 14px; font-family: 'Fira Code', monospace; font-size: 12px; line-height: 1.5; color: #dbe5f4; white-space: pre-wrap; margin: 0;"></pre>
+          </section>
+        </div>
+      </section>
     </main>
   </div>
 
@@ -954,7 +978,8 @@
       send: '<svg viewBox="0 0 24 24"><path d="M22 2L11 13"/><path d="M22 2l-7 20-4-9-9-4z"/></svg>',
       trash: '<svg viewBox="0 0 24 24"><path d="M3 6h18"/><path d="M8 6V4h8v2"/><path d="M19 6l-1 14H6L5 6"/><path d="M10 11v6M14 11v6"/></svg>',
       download: '<svg viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>',
-      upload: '<svg viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>'
+      upload: '<svg viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>',
+      copy: '<svg viewBox="0 0 24 24"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>'
     };
 
     document.querySelectorAll("[data-icon]").forEach(el => { el.innerHTML = icons[el.dataset.icon] || ""; });
@@ -977,7 +1002,8 @@
       prompts: ["Prompts", "Reusable AI instructions for verification."],
       live: ["Live View", "Watch configured camera streams."],
       settings: ["Settings", "Configure AI, detection, alerts, and storage."],
-      tools: ["Tools", "Run diagnostics and account updates."]
+      tools: ["Tools", "Run diagnostics and account updates."],
+      logs: ["System Logs", "Xem logs hệ thống thời gian thực."]
     };
 
     const configFields = [
@@ -1131,6 +1157,7 @@
       if (path === "/live") return { view: "live", camera: "" };
       if (path === "/settings") return { view: "settings", camera: "" };
       if (path === "/tools") return { view: "tools", camera: "" };
+      if (path === "/logs") return { view: "logs", camera: "" };
       if (location.hash) return parseViewRoute(location.hash);
       return { view: "dashboard", camera: "" };
     }
@@ -1138,6 +1165,41 @@
     function viewUrl(name) {
       if (name === "dashboard") return "/";
       return `/${name}`;
+    }
+
+    let logIntervalId = null;
+
+    async function loadLogs() {
+      try {
+        const data = await api("/api/logs");
+        const logContentEl = $("logContent");
+        if (!logContentEl) return;
+        
+        // Save current scroll position
+        const isAtBottom = logContentEl.scrollHeight - logContentEl.scrollTop <= logContentEl.clientHeight + 40;
+        
+        logContentEl.textContent = data.logs || "No logs available.";
+        
+        // Auto scroll if checked and user was already near bottom
+        if ($("autoScrollLog").checked && isAtBottom) {
+          logContentEl.scrollTop = logContentEl.scrollHeight;
+        }
+      } catch (err) {
+        console.error("Failed to load logs", err);
+      }
+    }
+
+    function startLogPolling() {
+      stopLogPolling();
+      loadLogs();
+      logIntervalId = setInterval(loadLogs, 2000);
+    }
+
+    function stopLogPolling() {
+      if (logIntervalId) {
+        clearInterval(logIntervalId);
+        logIntervalId = null;
+      }
     }
 
     function switchView(name, options = {}) {
@@ -1153,6 +1215,13 @@
       if (location.pathname !== nextUrl) history[method](null, "", nextUrl);
       if (name !== "live") clearLiveRefreshTimers();
       if (name === "live") renderLive();
+      
+      // Manage log polling active state
+      if (name === "logs") {
+        startLogPolling();
+      } else {
+        stopLogPolling();
+      }
     }
 
     function collectConfig() {
@@ -1828,6 +1897,27 @@
         showToast("Account updated", "ok");
       } catch (err) { setText("credStatus", err.message); showToast(err.message, "err"); }
     });
+
+    $("copyLogBtn").addEventListener("click", () => {
+      const text = $("logContent").textContent;
+      navigator.clipboard.writeText(text)
+        .then(() => showToast("Đã sao chép logs vào bộ nhớ tạm", "ok"))
+        .catch(err => showToast("Sao chép thất bại: " + err, "err"));
+    });
+
+    $("clearLogBtn").addEventListener("click", async () => {
+      if (confirm("Bạn có chắc chắn muốn xóa toàn bộ logs không?")) {
+        try {
+          const res = await api("/api/logs/clear", { method: "POST" });
+          showToast(res.message || "Đã xóa logs", "ok");
+          loadLogs();
+        } catch (err) {
+          showToast(err.message, "err");
+        }
+      }
+    });
+
+    $("refreshLogBtn").addEventListener("click", loadLogs);
 
     $("refreshViewerBtn").addEventListener("click", () => {
       if (state.viewerUrl) showViewer($("viewerTitle").textContent, state.viewerUrl.includes("?") ? `${state.viewerUrl}&ts=${Date.now()}` : `${state.viewerUrl}?ts=${Date.now()}`, state.viewerMode);
