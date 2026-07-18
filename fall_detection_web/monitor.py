@@ -603,7 +603,9 @@ def go2rtc_frame_request(config: dict[str, Any], camera: dict[str, Any]) -> tupl
     src = go2rtc_source(camera)
     if not base_url or not src:
         raise ValueError("go2rtc URL or camera source is empty")
-    request_src = video_only_source(src)
+    # For /api/frame.jpeg requests, strip any track-selection fragments (like #video)
+    # because go2rtc does not support fragments in frame requests and returns 404.
+    request_src = src.split("#", 1)[0]
     return f"{base_url}/api/frame.jpeg", go2rtc_video_only_params({"src": request_src}), src
 
 
